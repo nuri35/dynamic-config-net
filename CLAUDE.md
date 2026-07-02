@@ -26,7 +26,7 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 |---|---|---|---|---|---|
 | 0 | Scaffold, docs workflow, README v1 | done | 2026-07-02 | Solution + 4 projects build clean; mongo-only compose; constitution, ADRs, skills/hook | [phase-0](docs/phases/phase-0.md) |
 | 1 | Domain & storage (Mongo provider, compound index, query-level filtering) | done | 2026-07-02 | Record model + provider seam + Mongo provider; isolation proven at query level by rendered-filter test; 30/30 unit tests, no DB dependency | [phase-1](docs/phases/phase-1.md) |
-| 2 | Core reader (`GetValue<T>`, conversion engine, TDD, mocked provider) | pending | — | — | — |
+| 2 | Core reader (`GetValue<T>`, conversion engine, TDD, mocked provider) | done | 2026-07-02 | Case-exact public surface + internal DI ctor; FrozenDictionary snapshot; strict conversion engine (invariant culture, bool 1/0, 3 custom exceptions); 59/59 tests, zero DB | [phase-2](docs/phases/phase-2.md) |
 | 3 | Refresh & resilience (polling, snapshot swap, fallback, ADR 0004) | pending | — | — | — |
 | 4 | Web UI (REST list/add/update + frontend, client-side name filter) | pending | — | — | — |
 

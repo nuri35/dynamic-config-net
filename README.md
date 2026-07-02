@@ -96,7 +96,8 @@ int    maxItems   = reader.GetValue<int>("MaxItemCount");
 double rate       = reader.GetValue<double>("ConversionRate");
 
 // Unknown key            -> ConfigurationKeyNotFoundException
-// Wrong type for a key   -> ConfigurationTypeMismatchException
+// Wrong type for a key   -> ConfigurationTypeMismatchException (strict: no int->double widening)
+// Corrupt stored value   -> ConfigurationValueFormatException (fix the record, not the code)
 // Inactive record        -> not visible (treated as not found)
 // Other service's record -> not visible (filtered at the storage query)
 ```
