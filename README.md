@@ -58,23 +58,25 @@ flowchart LR
 
 ## Design Decisions
 
-### Why MongoDB (over Redis / MsSQL / file)
+Every architectural decision is captured as an ADR in [`docs/adr/`](docs/adr/); the highlights:
+
+### Why MongoDB (over Redis / MsSQL / file) — [ADR 0001](docs/adr/0001-mongodb-as-storage.md)
 - **Query-level isolation:** a compound index on `(ApplicationName, IsActive)` makes the per-service filtered read the cheapest possible operation, and the filter lives in the storage query — not in application memory.
 - **Heterogeneous values:** config records are schemaless by nature (`Value` is a string carrying an int, double, bool...). A document store fits this without column gymnastics.
 - **No relational needs:** a single collection, no joins, no transactions — an RDBMS would add ceremony without benefit. Redis would work as a cache but offers weaker querying and no natural durable system-of-record semantics for a management UI.
 - **Async-native driver:** the official MongoDB C# driver is async end-to-end, matching the library's fully asynchronous I/O paths (TPL / `async/await` bonus criterion).
 
-### Why polling + message broker hybrid
+### Why polling + message broker hybrid — [ADR 0003](docs/adr/0003-polling-plus-broker-hybrid.md)
 - **Broker (RabbitMQ)** gives *low latency*: a fanout `config-changed` event refreshes every subscribed reader within milliseconds of a UI change.
 - **Polling** gives *guaranteed consistency*: it needs no extra infrastructure to be correct, catches anything a lost/undelivered message would miss, and is the case's required baseline mechanism.
 - Each covers the other's weakness: broker down → polling still converges; long poll interval → broker still delivers instant updates.
 
-### Why atomic snapshot swap (over locking)
+### Why atomic snapshot swap (over locking) — [ADR 0002](docs/adr/0002-atomic-snapshot-swap.md)
 - The read path (`GetValue<T>`) is the hot path — it must never block. Snapshots are **immutable dictionaries**; the refresh loop builds a complete new snapshot and publishes it with a single atomic reference swap (`Interlocked.Exchange` / `volatile` read).
 - Readers therefore see either the *entire old* config set or the *entire new* one — never a torn, half-updated state. No reader/writer locks, no contention, no deadlock surface.
 - This is the same pattern Node.js developers get for free from the single-threaded event loop — in multi-threaded .NET it must be engineered explicitly.
 
-### Why storage sits behind an interface
+### Why storage sits behind an interface — [ADR 0004](docs/adr/0004-storage-behind-interface.md)
 - `IConfigurationStorageProvider` (Strategy/Repository pattern) decouples `ConfigurationReader` from MongoDB. The core reader is unit-tested against a mocked provider — no database required.
 - Swapping Mongo for Redis, SQL, or a file provider is a new implementation of one small interface; the reader, conversion engine, and refresh loop are untouched.
 
@@ -156,20 +158,30 @@ The core library is fully unit-tested against a mocked `IConfigurationStoragePro
 | Unit tests | `tests/DynamicConfig.Library.Tests` (xUnit, mocked storage) |
 | MongoDB/Redis storage | MongoDB (`mongo:7`) |
 | Runnable project | `docker-compose up --build` boots the entire ecosystem |
-| Documentation | this README |
+| Documentation | this README + [architecture doc](docs/architecture.md) + [ADRs](docs/adr/) + [phase docs](docs/phases/) |
 | Source control | GitHub, conventional commits per phase |
 | docker-compose for the whole ecosystem | `docker-compose.yml` (mongo, rabbitmq, webui, demoservice) |
 
-## Solution Structure
+## Repository Structure
 
 ```
-DynamicConfig.sln
+dynamic-config-net/
+├── CLAUDE.md                          # project constitution: decisions, phase table, standards
+├── README.md                          # this file
+├── docker-compose.yml                 # mongo + rabbitmq + webui + demoservice
+├── .claude/                           # AI workflow: review/compliance skills + build-test hook
+├── docs/
+│   ├── architecture.md                # end-to-end system picture (diagrams, flows, failure modes)
+│   ├── adr/                           # architecture decision records (0001–000N)
+│   └── phases/                        # one doc per completed development phase
 ├── src/
-│   ├── DynamicConfig.Library/        # the deliverable dll: ConfigurationReader, storage providers, models
-│   ├── DynamicConfig.WebUI/          # ASP.NET Core: REST API + frontend (list/add/update, name filter)
-│   └── DynamicConfig.DemoService/    # sample service consuming the library
-├── tests/
-│   └── DynamicConfig.Library.Tests/  # xUnit unit tests (mocked storage provider)
-├── docker-compose.yml                # mongo + rabbitmq + webui + demoservice
-└── README.md
+│   ├── DynamicConfig.Library/         # the deliverable dll: ConfigurationReader, providers, models
+│   ├── DynamicConfig.WebUI/           # ASP.NET Core: REST API + frontend (list/add/update, name filter)
+│   └── DynamicConfig.DemoService/     # sample service consuming the library
+└── tests/
+    └── DynamicConfig.Library.Tests/   # xUnit unit tests (mocked storage provider)
 ```
+
+## Development Workflow
+
+Development was AI-assisted using a structured phase/ADR workflow I designed: work proceeds in reviewed phases (each documented in [`docs/phases/`](docs/phases/)), every architectural decision is recorded as an ADR in [`docs/adr/`](docs/adr/), and the project constitution ([`CLAUDE.md`](CLAUDE.md)) plus custom compliance/review skills in [`.claude/`](.claude/) — including an automated build+test hook on every code edit — keep the process verifiable. The `.claude/` directory is committed intentionally to make that workflow inspectable.

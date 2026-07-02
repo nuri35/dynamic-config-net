@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File \".claude/hooks/post-edit-build-test.ps1\"",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}
