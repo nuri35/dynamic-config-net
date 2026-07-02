@@ -1,4 +1,4 @@
-# ADR 0004: Storage Behind `IConfigurationStorageProvider`
+# ADR 0003: Storage Behind `IConfigurationStorageProvider`
 
 - **Status:** Accepted
 - **Date:** 2026-07-02 (Phase 0; implemented in Phase 1)

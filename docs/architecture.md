@@ -1,8 +1,8 @@
 # Architecture
 
-End-to-end picture of the DynamicConfig system. For the reasoning behind each choice, see the ADRs in [`docs/adr/`](adr/).
+End-to-end picture of the DynamicConfig system. For the reasoning behind each choice, see the ADRs in [`docs/adr/`](adr/). Delivery is CORE-first: everything below is mandatory scope except the explicitly marked **EXTRA (planned)** section.
 
-## System Overview
+## System Overview (CORE)
 
 ```mermaid
 flowchart LR
@@ -14,43 +14,37 @@ flowchart LR
         CR["ConfigurationReader<br/>GetValue&lt;T&gt;(key)"]
         SNAP[("Immutable snapshot<br/>(in-memory cache)")]
         POLL["Background poller<br/>(PeriodicTimer)"]
-        SUB["RabbitMQ consumer<br/>(instant refresh)"]
         PROV["IConfigurationStorageProvider"]
     end
 
     MONGO[("MongoDB<br/>configuration records")]
-    MQ{{"RabbitMQ<br/>config-changed (fanout)"}}
-    UI["WebUI<br/>REST API + frontend"]
+    UI["WebUI<br/>REST API + frontend<br/>(list / add / update, name filter)"]
 
     APP -- "lock-free read" --> CR
     CR --> SNAP
     POLL -- "atomic swap" --> SNAP
-    SUB -- "trigger refresh" --> POLL
     POLL --> PROV
     PROV -- "ApplicationName + IsActive<br/>filtered query" --> MONGO
-    MQ --> SUB
     UI -- "CRUD" --> MONGO
-    UI -- "publish on change" --> MQ
 ```
 
-## Components
+## Components (CORE)
 
 | Component | Project | Responsibility |
 |---|---|---|
 | `ConfigurationReader` | `DynamicConfig.Library` | Public API: 3-param ctor + `T GetValue<T>(string key)`. Owns the snapshot and the refresh loop. |
 | Immutable snapshot | `DynamicConfig.Library` | Frozen dictionary of the service's active records; the *only* thing the read path touches. Doubles as the storage-down fallback. |
-| Background poller | `DynamicConfig.Library` | `PeriodicTimer` loop; re-queries storage each interval, builds a new snapshot, swaps atomically. |
-| RabbitMQ consumer | `DynamicConfig.Library` | Subscribes to the `config-changed` fanout exchange; triggers an immediate refresh (bonus path). |
+| Background poller | `DynamicConfig.Library` | `PeriodicTimer` loop; re-queries storage every `refreshTimerIntervalInMs`, builds a new snapshot, swaps atomically. |
 | `IConfigurationStorageProvider` | `DynamicConfig.Library` | Storage abstraction (Strategy/Repository). One method surface for "fetch my active records". |
 | `MongoConfigurationStorageProvider` | `DynamicConfig.Library` | Mongo implementation; `(ApplicationName, IsActive)` compound index; the isolation filter lives in the query. |
-| WebUI | `DynamicConfig.WebUI` | REST API + minimal frontend: list/add/update records, client-side name filter; publishes `config-changed` on writes. |
+| WebUI | `DynamicConfig.WebUI` | REST API + minimal frontend: list/add/update records, client-side name filter. |
 | DemoService | `DynamicConfig.DemoService` | Proof-of-consumption: boots with the library and exposes its live config values. |
 
-## Data Flows
+## Data Flows (CORE)
 
 ### Read path (hot, lock-free)
 
-`GetValue<T>(key)` → volatile read of the current snapshot reference → dictionary lookup → typed conversion result. No I/O, no locks, no allocation beyond the conversion. Unknown key → `ConfigurationKeyNotFoundException`; declared type ≠ requested `T` → `ConfigurationTypeMismatchException`.
+`GetValue<T>(key)` → volatile read of the current snapshot reference → dictionary lookup → typed conversion result. No I/O, no locks. Unknown key → `ConfigurationKeyNotFoundException`; declared type ≠ requested `T` → `ConfigurationTypeMismatchException`.
 
 ### Refresh path (background)
 
@@ -76,7 +70,18 @@ sequenceDiagram
     end
 ```
 
-### Event path (bonus, low latency)
+## Failure Modes (CORE)
+
+| Failure | Behavior | Guaranteed by |
+|---|---|---|
+| MongoDB unreachable at runtime | `GetValue<T>` keeps serving the last successful snapshot; poller retries every interval | Snapshot-as-fallback ([ADR 0002](adr/0002-atomic-snapshot-swap.md)) |
+| MongoDB unreachable at startup | ADR 0004 (Phase 3 decision) — current lean: empty snapshot + background retry | ADR 0004 (pending) |
+| Concurrent read during refresh | Reader sees entire old or entire new snapshot, never a mix | Atomic swap ([ADR 0002](adr/0002-atomic-snapshot-swap.md)) |
+| Service reads another service's key | Impossible — records are filtered by `ApplicationName` in the Mongo query; foreign records never enter memory | Query-level isolation ([ADR 0001](adr/0001-mongodb-as-storage.md)) |
+
+## EXTRA (planned — Phase 5, only after the Phase 4 checkpoint)
+
+Broker-triggered instant refresh, designed in [ADR 0005](adr/0005-polling-plus-broker-hybrid.md) (status: proposed). WebUI publishes a `config-changed` event to a RabbitMQ **fanout exchange** on every create/update; each library instance consumes it and triggers an immediate refresh through the same storage-query code path the poller uses. The event carries no data — signal, not state — so lost/duplicate messages are harmless and polling remains the guaranteed convergence path. Until Phase 5 lands, change propagation latency is bounded by one poll interval.
 
 ```mermaid
 sequenceDiagram
@@ -91,15 +96,4 @@ sequenceDiagram
     L->>L: trigger immediate refresh (same code path as poller)
 ```
 
-The event only *schedules* a refresh — the data always comes from MongoDB. Messages are signals, not state, so a lost message costs at most one poll interval of staleness.
-
-## Failure Modes
-
-| Failure | Behavior | Guaranteed by |
-|---|---|---|
-| MongoDB unreachable at runtime | `GetValue<T>` keeps serving the last successful snapshot; poller retries every interval | Snapshot-as-fallback (ADR 0002) |
-| MongoDB unreachable at startup | See ADR 0005 (Phase 3 decision) — current lean: empty snapshot + background retry | ADR 0005 (pending) |
-| RabbitMQ down | Event refresh degrades away silently; polling still converges within one interval | Hybrid refresh (ADR 0003) |
-| Lost/duplicate broker message | Harmless — refresh is idempotent and polling backstops losses | Signal-not-state design (ADR 0003) |
-| Concurrent read during refresh | Reader sees entire old or entire new snapshot, never a mix | Atomic swap (ADR 0002) |
-| Service reads another service's key | Impossible — records are filtered by `ApplicationName` in the Mongo query; foreign records never enter memory | Query-level isolation (ADR 0001) |
+Additional failure modes this introduces (all degrade to CORE behavior): RabbitMQ down → polling still converges within one interval; lost/duplicate message → refresh is idempotent and polling backstops.

@@ -14,24 +14,21 @@ flowchart LR
         CR["ConfigurationReader<br/>GetValue&lt;T&gt;(key)"]
         SNAP[("Immutable snapshot<br/>(in-memory cache)")]
         POLL["Background poller<br/>(PeriodicTimer)"]
-        SUB["RabbitMQ consumer<br/>(instant refresh)"]
         PROV["IConfigurationStorageProvider"]
     end
 
     MONGO[("MongoDB<br/>configuration records")]
-    MQ{{"RabbitMQ<br/>config-changed (fanout)"}}
     UI["WebUI<br/>REST API + frontend<br/>(list / add / update / filter)"]
 
     APP -- "lock-free read" --> CR
     CR --> SNAP
     POLL -- "atomic swap" --> SNAP
-    SUB -- "trigger refresh" --> POLL
     POLL --> PROV
     PROV -- "ApplicationName + IsActive<br/>filtered query" --> MONGO
-    MQ --> SUB
     UI -- "CRUD" --> MONGO
-    UI -- "publish on change" --> MQ
 ```
+
+> A RabbitMQ event path (WebUI publishes `config-changed`, the library refreshes instantly) is a planned EXTRA — see [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md).
 
 ## How It Works
 
@@ -40,10 +37,11 @@ flowchart LR
    The reader immediately loads its records and starts a background refresh loop.
 2. **Reads are lock-free** — `GetValue<T>(key)` reads from an **immutable in-memory snapshot**. No I/O, no locks, no `await` on the hot path.
 3. **Polling refresh** — a `PeriodicTimer`-based background loop re-queries storage at the configured interval, builds a *new* immutable snapshot off to the side, and swaps it in atomically (single reference swap). Readers never observe a half-updated state.
-4. **Broker-triggered refresh (bonus)** — when a record is created or updated in the WebUI, it publishes a `config-changed` event to a RabbitMQ fanout exchange. Each library instance consumes the event and refreshes immediately, so changes propagate in milliseconds instead of waiting for the next poll tick.
-5. **Resilience** — if storage becomes unreachable, the refresh cycle fails *silently for readers*: the last successfully loaded snapshot stays in place and `GetValue<T>` keeps serving it. When storage recovers, the next cycle swaps in fresh data. If RabbitMQ is down, event-driven refresh degrades gracefully and polling remains the guaranteed path.
-   *First-load behavior:* if storage is unreachable at startup, the reader starts with an empty snapshot and keeps retrying in the background — a degraded-but-alive service beats one that crashes at boot.
-6. **Isolation** — the storage query itself filters by `ApplicationName` **and** `IsActive`. Records belonging to other services never enter a reader's memory, so isolation cannot be bypassed by an in-memory bug.
+4. **Resilience** — if storage becomes unreachable, the refresh cycle fails *silently for readers*: the last successfully loaded snapshot stays in place and `GetValue<T>` keeps serving it. When storage recovers, the next cycle swaps in fresh data.
+   *First-load behavior:* if storage is unreachable at startup, the reader starts with an empty snapshot and keeps retrying in the background — a degraded-but-alive service beats one that crashes at boot ([ADR 0004](docs/adr/), decided in Phase 3).
+5. **Isolation** — the storage query itself filters by `ApplicationName` **and** `IsActive`. Records belonging to other services never enter a reader's memory, so isolation cannot be bypassed by an in-memory bug.
+
+*Planned EXTRA — broker-triggered refresh:* the WebUI will publish a `config-changed` event to a RabbitMQ fanout exchange on every change; each library instance consumes it and refreshes within milliseconds, with polling remaining the guaranteed fallback ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)).
 
 ### Record schema
 
@@ -66,19 +64,19 @@ Every architectural decision is captured as an ADR in [`docs/adr/`](docs/adr/); 
 - **No relational needs:** a single collection, no joins, no transactions — an RDBMS would add ceremony without benefit. Redis would work as a cache but offers weaker querying and no natural durable system-of-record semantics for a management UI.
 - **Async-native driver:** the official MongoDB C# driver is async end-to-end, matching the library's fully asynchronous I/O paths (TPL / `async/await` bonus criterion).
 
-### Why polling + message broker hybrid — [ADR 0003](docs/adr/0003-polling-plus-broker-hybrid.md)
-- **Broker (RabbitMQ)** gives *low latency*: a fanout `config-changed` event refreshes every subscribed reader within milliseconds of a UI change.
-- **Polling** gives *guaranteed consistency*: it needs no extra infrastructure to be correct, catches anything a lost/undelivered message would miss, and is the case's required baseline mechanism.
-- Each covers the other's weakness: broker down → polling still converges; long poll interval → broker still delivers instant updates.
-
 ### Why atomic snapshot swap (over locking) — [ADR 0002](docs/adr/0002-atomic-snapshot-swap.md)
 - The read path (`GetValue<T>`) is the hot path — it must never block. Snapshots are **immutable dictionaries**; the refresh loop builds a complete new snapshot and publishes it with a single atomic reference swap (`Interlocked.Exchange` / `volatile` read).
 - Readers therefore see either the *entire old* config set or the *entire new* one — never a torn, half-updated state. No reader/writer locks, no contention, no deadlock surface.
 - This is the same pattern Node.js developers get for free from the single-threaded event loop — in multi-threaded .NET it must be engineered explicitly.
 
-### Why storage sits behind an interface — [ADR 0004](docs/adr/0004-storage-behind-interface.md)
+### Why storage sits behind an interface — [ADR 0003](docs/adr/0003-storage-behind-interface.md)
 - `IConfigurationStorageProvider` (Strategy/Repository pattern) decouples `ConfigurationReader` from MongoDB. The core reader is unit-tested against a mocked provider — no database required.
 - Swapping Mongo for Redis, SQL, or a file provider is a new implementation of one small interface; the reader, conversion engine, and refresh loop are untouched.
+
+### Why polling + broker hybrid (planned EXTRA) — [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)
+- **Polling** (mandatory, always on) gives *guaranteed consistency*: correct with no extra infrastructure, catches anything a lost message would miss.
+- **Broker (RabbitMQ)** adds *low latency*: a fanout `config-changed` event refreshes every subscribed reader within milliseconds of a UI change. Events are signals, not state — MongoDB stays the single source of truth.
+- Each covers the other's weakness: broker down → polling still converges; long poll interval → broker still delivers instant updates.
 
 ## Usage
 
@@ -105,20 +103,24 @@ double rate       = reader.GetValue<double>("ConversionRate");
 
 ## Running the Project
 
-Prerequisites: Docker + Docker Compose.
+Prerequisites: Docker (for storage) + .NET 8 SDK.
 
 ```bash
-docker-compose up --build
+# 1. Start storage
+docker-compose up -d
+
+# 2. Run the web UI and the demo service
+dotnet run --project src/DynamicConfig.WebUI
+dotnet run --project src/DynamicConfig.DemoService
 ```
 
 | Service | URL | Notes |
 |---|---|---|
 | Web UI (config management) | http://localhost:8080 | list / add / update, client-side name filter |
 | Demo service (library consumer) | http://localhost:8081 | shows live config values for `SERVICE-A` |
-| RabbitMQ management | http://localhost:15672 | `guest` / `guest` |
 | MongoDB | mongodb://localhost:27017 | database `dynamicconfig` |
 
-Change a value in the Web UI and watch the demo service pick it up — instantly via RabbitMQ, or within one poll interval if the broker is unavailable.
+Change a value in the Web UI and watch the demo service pick it up within one poll interval (instant broker-pushed refresh is a planned EXTRA — Phase 5; single-command full-ecosystem docker-compose is planned for Phase 6).
 
 ## Running Tests
 
@@ -130,7 +132,7 @@ The core library is fully unit-tested against a mocked `IConfigurationStoragePro
 
 ## Requirements Coverage
 
-### Core requirements
+### Mandatory requirements (all covered by CORE phases 0–4)
 
 | Requirement (case) | Where |
 |---|---|
@@ -148,19 +150,21 @@ The core library is fully unit-tested against a mocked `IConfigurationStoragePro
 
 ### Extra points
 
-| Bonus item | Where |
-|---|---|
-| Message broker | RabbitMQ `config-changed` fanout: WebUI publisher + library consumer |
-| TPL, async/await | all I/O paths async end-to-end |
-| Concurrency-safe design | immutable snapshot + atomic reference swap, lock-free reads |
-| Design & architectural patterns | Strategy/Repository (`IConfigurationStorageProvider`), immutable snapshot, publisher/subscriber |
-| TDD | library developed test-first; see commit history |
-| Unit tests | `tests/DynamicConfig.Library.Tests` (xUnit, mocked storage) |
-| MongoDB/Redis storage | MongoDB (`mongo:7`) |
-| Runnable project | `docker-compose up --build` boots the entire ecosystem |
-| Documentation | this README + [architecture doc](docs/architecture.md) + [ADRs](docs/adr/) + [phase docs](docs/phases/) |
-| Source control | GitHub, conventional commits per phase |
-| docker-compose for the whole ecosystem | `docker-compose.yml` (mongo, rabbitmq, webui, demoservice) |
+Quality practices are embedded in the CORE phases (they are *how the code is written*, not deferrable features); infrastructure extras land in EXTRA phases 5–7.
+
+| Bonus item | Status | Where |
+|---|---|---|
+| TPL, async/await | ✅ done (embedded in core) | all I/O paths async end-to-end from the first line |
+| Concurrency-safe design | ✅ done (embedded in core) | immutable snapshot + atomic reference swap, lock-free reads ([ADR 0002](docs/adr/0002-atomic-snapshot-swap.md)) |
+| Design & architectural patterns | ✅ done (embedded in core) | Strategy/Repository (`IConfigurationStorageProvider`), immutable snapshot |
+| TDD | ✅ done (embedded in core) | tests land in the same phase as the code they specify; see commit history |
+| Unit tests | ✅ done (embedded in core) | `tests/DynamicConfig.Library.Tests` (xUnit, mocked storage) |
+| MongoDB/Redis storage | ✅ done | MongoDB (`mongo:7`), [ADR 0001](docs/adr/0001-mongodb-as-storage.md) |
+| Runnable project | ✅ done | `docker-compose up -d` (storage) + `dotnet run` per service |
+| Documentation | ✅ done | this README + [architecture doc](docs/architecture.md) + [ADRs](docs/adr/) + [phase docs](docs/phases/) |
+| Source control | ✅ done | GitHub, conventional commits per phase |
+| Message broker | 🔜 planned (Phase 5) | RabbitMQ `config-changed` fanout: WebUI publisher + library consumer ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)) |
+| docker-compose for the whole ecosystem | 🔜 planned (Phase 6) | single command boots mongo + rabbitmq + webui + demoservice |
 
 ## Repository Structure
 
@@ -168,7 +172,7 @@ The core library is fully unit-tested against a mocked `IConfigurationStoragePro
 dynamic-config-net/
 ├── CLAUDE.md                          # project constitution: decisions, phase table, standards
 ├── README.md                          # this file
-├── docker-compose.yml                 # mongo + rabbitmq + webui + demoservice
+├── docker-compose.yml                 # Phase 0: mongo only → Phase 6: full ecosystem
 ├── .claude/                           # AI workflow: review/compliance skills + build-test hook
 ├── docs/
 │   ├── architecture.md                # end-to-end system picture (diagrams, flows, failure modes)

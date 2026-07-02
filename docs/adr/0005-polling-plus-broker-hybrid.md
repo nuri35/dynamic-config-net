@@ -1,7 +1,7 @@
-# ADR 0003: Polling + Message Broker Hybrid Refresh
+# ADR 0005: Polling + Message Broker Hybrid Refresh
 
-- **Status:** Accepted
-- **Date:** 2026-07-02 (Phase 0; polling in Phase 3, broker in Phase 4)
+- **Status:** Proposed — EXTRA feature, ratified when Phase 5 starts (the polling baseline itself is a mandatory requirement and ships in Phase 3)
+- **Date:** 2026-07-02 (drafted in Phase 0 planning; broker implementation deferred to Phase 5)
 
 ## Context
 

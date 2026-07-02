@@ -4,7 +4,7 @@
 
 ## 1. Project Summary
 
-DynamicConfig is a .NET 8 dynamic configuration system built for a backend developer code case. It replaces static config files (`appsettings.json`, `web.config`) with a MongoDB-backed store so values change **without deployment, restart, or recycle**. A reusable class library (`ConfigurationReader`) serves typed values from an immutable in-memory snapshot refreshed by background polling plus RabbitMQ change events; a web UI manages the records. Each consuming service sees only its own active records, enforced at the storage query level.
+DynamicConfig is a .NET 8 dynamic configuration system built for a backend developer code case. It replaces static config files (`appsettings.json`, `web.config`) with a MongoDB-backed store so values change **without deployment, restart, or recycle**. A reusable class library (`ConfigurationReader`) serves typed values from an immutable in-memory snapshot refreshed by background polling; a web UI manages the records. Each consuming service sees only its own active records, enforced at the storage query level. Delivery is **CORE-first**: phases 0–4 satisfy every mandatory case requirement; bonus features (RabbitMQ instant refresh, full docker-compose ecosystem) land in EXTRA phases 5–7 only if time allows.
 
 ## 2. Locked Decisions
 
@@ -12,39 +12,51 @@ DynamicConfig is a .NET 8 dynamic configuration system built for a backend devel
 |---|---|---|---|
 | 1 | MongoDB as storage (`mongo:7`) | Query-level isolation via `(ApplicationName, IsActive)` compound index; heterogeneous values fit documents; async-native driver | [ADR 0001](docs/adr/0001-mongodb-as-storage.md) |
 | 2 | Atomic immutable-snapshot swap for concurrency | Lock-free `GetValue<T>` hot path; readers never see torn state | [ADR 0002](docs/adr/0002-atomic-snapshot-swap.md) |
-| 3 | Polling + RabbitMQ hybrid refresh | Broker = millisecond latency; polling = guaranteed convergence and broker-down fallback | [ADR 0003](docs/adr/0003-polling-plus-broker-hybrid.md) |
-| 4 | Storage behind `IConfigurationStorageProvider` | Reader unit-testable with mocks; storage swappable without touching core | [ADR 0004](docs/adr/0004-storage-behind-interface.md) |
-| 5 | First-load-failure behavior | *To be decided in Phase 3* (throw vs. empty snapshot + background retry; currently leaning empty+retry) | ADR 0005 (pending) |
+| 3 | Storage behind `IConfigurationStorageProvider` | Reader unit-testable with mocks; storage swappable without touching core | [ADR 0003](docs/adr/0003-storage-behind-interface.md) |
+| 4 | First-load-failure behavior | *To be decided in Phase 3* (throw vs. empty snapshot + background retry; currently leaning empty+retry) | ADR 0004 (pending) |
+| 5 | Polling + RabbitMQ hybrid refresh — **EXTRA, Phase 5 only** | Broker = millisecond latency; polling = guaranteed convergence and broker-down fallback. No broker code before Phase 5. | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) (proposed) |
 
 Rules: changing a locked decision requires the user's explicit approval. Any decision made or revised mid-phase updates this table **and** its ADR in the same commit.
 
 ## 3. Phase Table
 
+### CORE — mandatory requirements (submittable after Phase 4)
+
 | Phase | Scope | Status | Completed | Outcome | Doc |
 |---|---|---|---|---|---|
-| 0 | Scaffold, docs workflow, README | done | 2026-07-02 | Solution + 4 projects build clean; compose skeleton; constitution, ADRs 0001–0004, skills/hook | [phase-0](docs/phases/phase-0.md) |
-| 1 | Domain & storage (Mongo provider, compound index) | pending | — | — | — |
-| 2 | Core reader (`GetValue<T>`, conversion engine, TDD) | pending | — | — | — |
-| 3 | Refresh & resilience (polling, snapshot swap, fallback) | pending | — | — | — |
-| 4 | RabbitMQ instant refresh (bonus) | pending | — | — | — |
-| 5 | Web UI (REST + frontend, name filter) | pending | — | — | — |
-| 6 | Packaging (full compose, README polish, e2e) | pending | — | — | — |
+| 0 | Scaffold, docs workflow, README v1 | done | 2026-07-02 | Solution + 4 projects build clean; mongo-only compose; constitution, ADRs, skills/hook | [phase-0](docs/phases/phase-0.md) |
+| 1 | Domain & storage (Mongo provider, compound index, query-level filtering) | pending | — | — | — |
+| 2 | Core reader (`GetValue<T>`, conversion engine, TDD, mocked provider) | pending | — | — | — |
+| 3 | Refresh & resilience (polling, snapshot swap, fallback, ADR 0004) | pending | — | — | — |
+| 4 | Web UI (REST list/add/update + frontend, client-side name filter) | pending | — | — | — |
+
+**✅ CHECKPOINT after Phase 4: every mandatory case requirement is met — project is submittable. EXTRA work needs the user's explicit go-ahead.**
+
+### EXTRA — bonus features (only if time allows, in this order)
+
+| Phase | Scope | Status | Completed | Outcome | Doc |
+|---|---|---|---|---|---|
+| 5 | RabbitMQ instant refresh (publisher + consumer, graceful degradation, ADR 0005) | pending | — | — | — |
+| 6 | Full docker-compose ecosystem (mongo + rabbitmq + webui + demoservice) | pending | — | — | — |
+| 7 | Documentation polish (README final pass, diagrams, coverage checklist) | pending | — | — | — |
 
 ## 4. Code Standards
 
 - **Meaningful names** — no abbreviations; a method name states what it does, a test name states the behavior it proves.
 - **Small, single-responsibility methods**; SOLID throughout (DI and SRP especially).
-- **No magic strings/numbers** — constants or enums (`ConfigurationValueType`, collection names, exchange names).
+- **No magic strings/numbers** — constants or enums (`ConfigurationValueType`, collection names).
 - **Early returns** over deep nesting.
-- **`async/await` end-to-end** on every I/O path — no `.Result`, no `.Wait()`, no `async void` outside event handlers (explicit bonus criterion: TPL usage).
+- **`async/await` end-to-end** on every I/O path from the first line — never retrofitted; no `.Result`, no `.Wait()`, no `async void` outside event handlers (explicit bonus criterion: TPL usage).
 - **Custom exceptions with clear messages**: `ConfigurationKeyNotFoundException`, `ConfigurationTypeMismatchException`.
 - **Comments explain WHY**, and flag .NET idioms that differ from Node.js expectations (the maintainer's background is NestJS/TypeScript) — e.g. `IHostedService` vs. NestJS lifecycle hooks, `Interlocked.Exchange` vs. single-threaded event loop assumptions.
 - The case's public surface is frozen: ctor `ConfigurationReader(applicationName, connectionString, refreshTimerIntervalInMs)` and exactly one public method `T GetValue<T>(string key)`.
+- Quality practices are **embedded in CORE phases, not deferred**: TDD lands with the code it specifies; async, concurrency safety, and the provider pattern are designed in from the start.
 
 ## 5. Working Rules
 
 - Architecture questions **before** implementing; ask "which module / new or existing / how does this integrate" when structure is ambiguous.
 - Show code structure first, then implementation. Production-ready code only.
+- **No EXTRA/bonus work inside CORE phases.** RabbitMQ code must not appear before Phase 5. EXTRA phases start only after the user's explicit approval at the Phase 4 checkpoint.
 - **End of every phase** (use the `phase-docs` skill): write `docs/phases/phase-N.md`, update the phase table above, write/update ADRs for any architectural decision made during the phase.
 - **Before every phase commit**: run the `case-compliance` skill (hard-requirement scan) and the `dotnet-reviewer` skill.
 - Conventional commits, one per phase: `feat(phase-1): storage layer with mongo provider`.
@@ -55,7 +67,7 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 
 1. **CLAUDE.md** (this file) — constitution + phase table
 2. **[docs/architecture.md](docs/architecture.md)** — end-to-end picture
-3. **[ADR 0002](docs/adr/0002-atomic-snapshot-swap.md) + [ADR 0003](docs/adr/0003-polling-plus-broker-hybrid.md)** — the two core architectural decisions
+3. **[ADR 0002](docs/adr/0002-atomic-snapshot-swap.md)** — the core concurrency decision (snapshot swap)
 4. **docs/phases/phase-3.md** — the most critical phase story (refresh & resilience), once it exists
 5. **tests/DynamicConfig.Library.Tests** — behavior specification in executable form
 
