@@ -11,8 +11,8 @@
 
 The current configuration lives in an **immutable dictionary snapshot** referenced by a single field.
 
-- **Read path:** `GetValue<T>` performs a volatile read of the snapshot reference and a dictionary lookup. No locks, no I/O, no awaiting.
-- **Write path:** the refresh loop builds a *complete new* immutable snapshot off to the side, then publishes it with one atomic reference swap (`Interlocked.Exchange` / `volatile` write). There is exactly one writer (the refresh loop), many readers.
+- **Read path:** `GetValue<T>` copies the snapshot reference to a local with `Volatile.Read` **once at entry** and works only with that local — the field is never re-read mid-operation, so one call always sees one generation. No locks, no I/O, no awaiting.
+- **Write path:** the refresh loop builds a *complete new* immutable snapshot (a `FrozenDictionary`, chosen in Phase 2) off to the side, then publishes it with `Volatile.Write` — the read/write pair forms the memory barrier that guarantees construction-happens-before-publication visibility across cores. There is exactly one writer (the refresh loop; `PeriodicTimer` ticks cannot overlap), many readers.
 
 ## Consequences
 
@@ -27,6 +27,8 @@ The current configuration lives in an **immutable dictionary snapshot** referenc
 
 ## Alternatives Considered
 
-- **`lock` around a shared dictionary** — correct but serializes the hot path and couples read latency to refresh duration.
+- **`lock` around a shared dictionary** — correct but serializes the hot path and couples read latency to refresh duration (read-path contention).
 - **`ReaderWriterLockSlim`** — better than `lock`, still blocks readers during swap and adds disposal/recursion pitfalls for no benefit at this size.
-- **`ConcurrentDictionary` mutated in place** — thread-safe per operation but *not* per refresh: readers could observe a mix of old and new values mid-update (torn state), which is exactly the bug class this ADR eliminates.
+- **`ConcurrentDictionary` mutated in place** — thread-safe *per key operation* but not *per refresh*: while the loop upserts/removes entries, a reader can observe key A from the new generation and key B from the old one (the mixed-generation read problem). Per-key atomicity is the wrong unit; the consistency unit here is the whole config set.
+- **MongoDB Change Streams instead of polling** — elegant push model, but the case mandates parametric polling (`refreshTimerIntervalInMs` is a required constructor parameter, and "periodic check" is a hard requirement). Change streams also require replica-set deployments. Push-based freshness is the EXTRA broker path (ADR 0005), layered *on top of* polling, never replacing it.
+- **Per-call DB read + TTL cache** — no snapshot to manage, but the cache expiring during a storage outage leaves the reader with *nothing* to serve, violating the case's last-known-good requirement; it also puts I/O (and its latency spikes) back on the hot path whenever the TTL lapses.

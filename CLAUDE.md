@@ -13,7 +13,7 @@ DynamicConfig is a .NET 8 dynamic configuration system built for a backend devel
 | 1 | MongoDB as storage (`mongo:7`) | Query-level isolation via `(ApplicationName, IsActive)` compound index; heterogeneous values fit documents; async-native driver | [ADR 0001](docs/adr/0001-mongodb-as-storage.md) |
 | 2 | Atomic immutable-snapshot swap for concurrency | Lock-free `GetValue<T>` hot path; readers never see torn state | [ADR 0002](docs/adr/0002-atomic-snapshot-swap.md) |
 | 3 | Storage behind `IConfigurationStorageProvider` | Reader unit-testable with mocks; storage swappable without touching core | [ADR 0003](docs/adr/0003-storage-behind-interface.md) |
-| 4 | First-load-failure behavior | *To be decided in Phase 3* (throw vs. empty snapshot + background retry; currently leaning empty+retry) | ADR 0004 (pending) |
+| 4 | Fail-fast on initial load | "Last successful records" presupposes one success; config-less service misbehaves anyway; boot-throw composes with orchestrator restarts | [ADR 0004](docs/adr/0004-fail-fast-initial-load.md) |
 | 5 | Polling + RabbitMQ hybrid refresh — **EXTRA, Phase 5 only** | Broker = millisecond latency; polling = guaranteed convergence and broker-down fallback. No broker code before Phase 5. | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) (proposed) |
 
 Rules: changing a locked decision requires the user's explicit approval. Any decision made or revised mid-phase updates this table **and** its ADR in the same commit.
@@ -27,7 +27,7 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 | 0 | Scaffold, docs workflow, README v1 | done | 2026-07-02 | Solution + 4 projects build clean; mongo-only compose; constitution, ADRs, skills/hook | [phase-0](docs/phases/phase-0.md) |
 | 1 | Domain & storage (Mongo provider, compound index, query-level filtering) | done | 2026-07-02 | Record model + provider seam + Mongo provider; isolation proven at query level by rendered-filter test; 30/30 unit tests, no DB dependency | [phase-1](docs/phases/phase-1.md) |
 | 2 | Core reader (`GetValue<T>`, conversion engine, TDD, mocked provider) | done | 2026-07-02 | Case-exact public surface + internal DI ctor; FrozenDictionary snapshot; strict conversion engine (invariant culture, bool 1/0, 3 custom exceptions); 59/59 tests, zero DB | [phase-2](docs/phases/phase-2.md) |
-| 3 | Refresh & resilience (polling, snapshot swap, fallback, ADR 0004) | pending | — | — | — |
+| 3 | Refresh & resilience (polling, snapshot swap, fallback, ADR 0004) | done | 2026-07-02 | PeriodicTimer loop + Volatile.Read/Write swap + last-good fallback + IDisposable/IAsyncDisposable; ADR 0004 accepted (fail-fast); 69/69 tests | [phase-3](docs/phases/phase-3.md) |
 | 4 | Web UI (REST list/add/update + frontend, client-side name filter) | pending | — | — | — |
 
 **✅ CHECKPOINT after Phase 4: every mandatory case requirement is met — project is submittable. EXTRA work needs the user's explicit go-ahead.**

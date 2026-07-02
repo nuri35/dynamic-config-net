@@ -69,9 +69,9 @@ public class ConfigurationReaderConstructionTests
     [Fact]
     public void Constructor_InitialLoadFails_PropagatesTheStorageException()
     {
-        // Phase 2 behavior: a reader that cannot load once has nothing to serve, so the
-        // storage failure surfaces to the caller unwrapped. Phase 3's ADR 0004 decides
-        // whether this becomes empty-snapshot-plus-background-retry instead.
+        // Fail-fast on initial load, decided in ADR 0004 (Accepted): the case's fallback
+        // clause presupposes at least one successful load, and a service booted with zero
+        // config would misbehave on every GetValue anyway. This test pins that contract.
         var storageFailure = new InvalidOperationException("storage unreachable");
         var provider = FakeConfigurationStorageProvider.Throwing(storageFailure);
 

@@ -75,7 +75,7 @@ sequenceDiagram
 | Failure | Behavior | Guaranteed by |
 |---|---|---|
 | MongoDB unreachable at runtime | `GetValue<T>` keeps serving the last successful snapshot; poller retries every interval | Snapshot-as-fallback ([ADR 0002](adr/0002-atomic-snapshot-swap.md)) |
-| MongoDB unreachable at startup | ADR 0004 (Phase 3 decision) — current lean: empty snapshot + background retry | ADR 0004 (pending) |
+| MongoDB unreachable at startup | Constructor throws (fail-fast); host's restart policy retries the boot | [ADR 0004](adr/0004-fail-fast-initial-load.md) |
 | Concurrent read during refresh | Reader sees entire old or entire new snapshot, never a mix | Atomic swap ([ADR 0002](adr/0002-atomic-snapshot-swap.md)) |
 | Service reads another service's key | Impossible — records are filtered by `ApplicationName` in the Mongo query; foreign records never enter memory | Query-level isolation ([ADR 0001](adr/0001-mongodb-as-storage.md)) |
 
