@@ -118,7 +118,7 @@ dotnet run --project src/DynamicConfig.DemoService
 |---|---|---|
 | Web UI (config management) | http://localhost:8080 | list / add / update, client-side name filter |
 | Demo service (library consumer) | http://localhost:8081 | shows live config values for `SERVICE-A` |
-| MongoDB | mongodb://localhost:27017 | database `dynamicconfig` |
+| MongoDB | mongodb://localhost:27017 | database `DynamicConfigDb` (default when the connection string names none) |
 
 Change a value in the Web UI and watch the demo service pick it up within one poll interval (instant broker-pushed refresh is a planned EXTRA — Phase 5; single-command full-ecosystem docker-compose is planned for Phase 6).
 
