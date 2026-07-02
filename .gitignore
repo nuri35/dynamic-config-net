@@ -1,0 +1,40 @@
+# .NET build outputs
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+artifacts/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider
+*.sln.iml
+
+# Test results / coverage
+[Tt]est[Rr]esults/
+*.trx
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.opencover.xml
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+!packages/build/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Local secrets / env
+*.env
+appsettings.*.local.json

@@ -1,0 +1,42 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: dynamicconfig-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - dynamicconfig
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: dynamicconfig-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - dynamicconfig
+
+  # --- Application services are added in Phase 6 (Packaging) ---
+  # webui:        ASP.NET Core REST API + frontend (depends_on: mongo healthy, rabbitmq healthy)
+  # demoservice:  Sample consumer of DynamicConfig.Library (depends_on: mongo healthy)
+
+volumes:
+  mongo-data:
+
+networks:
+  dynamicconfig:
+    driver: bridge
