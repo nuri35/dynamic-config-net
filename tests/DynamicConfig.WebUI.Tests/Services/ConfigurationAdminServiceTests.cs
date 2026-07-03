@@ -7,6 +7,11 @@ namespace DynamicConfig.WebUI.Tests.Services;
 
 public class ConfigurationAdminServiceTests
 {
+    // Well-formed ObjectIds: id-format validation happens before existence checks,
+    // so "exists" and "unknown" scenarios both need storage-valid ids.
+    private const string ExistingId = "65f1a2b3c4d5e6f7a8b9c0d1";
+    private const string UnknownId = "65f1a2b3c4d5e6f7a8b9c0d2";
+
     private readonly FakeConfigurationAdminRepository _repository = new();
     private readonly ConfigurationAdminService _service;
 
@@ -122,6 +127,42 @@ public class ConfigurationAdminServiceTests
         Assert.Null(_repository.LastCreatedRecord);
     }
 
+    // --- Create: IsActive tri-state --------------------------------------------
+
+    [Fact]
+    public async Task CreateAsync_IsActiveNotProvided_DefaultsToTrue()
+    {
+        // A record the client created without an explicit choice should take effect
+        // immediately — an invisible-by-default config surprises operators.
+        var record = BuildValidRecord();
+        record.IsActive = false; // whatever the record carries is ignored; the parameter is the channel
+
+        await _service.CreateAsync(record);
+
+        Assert.True(_repository.LastCreatedRecord!.IsActive);
+    }
+
+    [Fact]
+    public async Task CreateAsync_IsActiveExplicitlyFalse_StoresInactiveRecord()
+    {
+        var record = BuildValidRecord();
+
+        await _service.CreateAsync(record, isActive: false);
+
+        Assert.False(_repository.LastCreatedRecord!.IsActive);
+    }
+
+    [Fact]
+    public async Task CreateAsync_IsActiveExplicitlyTrue_StoresActiveRecord()
+    {
+        var record = BuildValidRecord();
+        record.IsActive = false;
+
+        await _service.CreateAsync(record, isActive: true);
+
+        Assert.True(_repository.LastCreatedRecord!.IsActive);
+    }
+
     // --- Create: timestamp ownership ------------------------------------------
 
     [Fact]
@@ -143,8 +184,8 @@ public class ConfigurationAdminServiceTests
     [Fact]
     public async Task UpdateAsync_ExistingRecord_PersistsChangedFields()
     {
-        _repository.Seed(BuildValidRecord(id: "existing-id", value: "old-value"));
-        var updated = BuildValidRecord(id: "existing-id", value: "new-value");
+        _repository.Seed(BuildValidRecord(id: ExistingId, value: "old-value"));
+        var updated = BuildValidRecord(id: ExistingId, value: "new-value");
 
         await _service.UpdateAsync(updated);
 
@@ -158,8 +199,8 @@ public class ConfigurationAdminServiceTests
         // detection order records by LastModifiedDate — a stale timestamp on update
         // would make consumers keep serving the OLD value. This test pins the rule.
         var staleDate = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        _repository.Seed(BuildValidRecord(id: "existing-id"));
-        var updated = BuildValidRecord(id: "existing-id");
+        _repository.Seed(BuildValidRecord(id: ExistingId));
+        var updated = BuildValidRecord(id: ExistingId);
         updated.LastModifiedDate = staleDate;
         var beforeUpdate = DateTime.UtcNow;
 
@@ -174,12 +215,12 @@ public class ConfigurationAdminServiceTests
     [Fact]
     public async Task UpdateAsync_UnknownId_ThrowsRecordNotFound()
     {
-        var record = BuildValidRecord(id: "no-such-id");
+        var record = BuildValidRecord(id: UnknownId);
 
         var exception = await Assert.ThrowsAsync<ConfigurationRecordNotFoundException>(
             () => _service.UpdateAsync(record));
 
-        Assert.Equal("no-such-id", exception.RecordId);
+        Assert.Equal(UnknownId, exception.RecordId);
     }
 
     [Theory]
@@ -193,10 +234,22 @@ public class ConfigurationAdminServiceTests
     }
 
     [Fact]
+    public async Task UpdateAsync_MalformedId_ThrowsValidationNotMongoError()
+    {
+        // A garbage id must be caught by service validation — not leak up as a
+        // storage FormatException, and not masquerade as a 404-style not-found.
+        var record = BuildValidRecord(id: "not-an-objectid");
+
+        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.UpdateAsync(record));
+
+        Assert.Null(_repository.LastUpdatedRecord); // rejected before any storage call
+    }
+
+    [Fact]
     public async Task UpdateAsync_ValueNotParseableAsDeclaredType_ThrowsValidation()
     {
-        _repository.Seed(BuildValidRecord(id: "existing-id"));
-        var updated = BuildValidRecord(id: "existing-id", type: "int", value: "abc");
+        _repository.Seed(BuildValidRecord(id: ExistingId));
+        var updated = BuildValidRecord(id: ExistingId, type: "int", value: "abc");
 
         await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.UpdateAsync(updated));
 
@@ -228,17 +281,27 @@ public class ConfigurationAdminServiceTests
     [Fact]
     public async Task GetByIdAsync_ExistingRecord_ReturnsIt()
     {
-        _repository.Seed(BuildValidRecord(id: "existing-id"));
+        _repository.Seed(BuildValidRecord(id: ExistingId));
 
-        var found = await _service.GetByIdAsync("existing-id");
+        var found = await _service.GetByIdAsync(ExistingId);
 
-        Assert.Equal("existing-id", found.Id);
+        Assert.Equal(ExistingId, found.Id);
     }
 
     [Fact]
     public async Task GetByIdAsync_UnknownId_ThrowsRecordNotFound()
     {
         await Assert.ThrowsAsync<ConfigurationRecordNotFoundException>(
-            () => _service.GetByIdAsync("no-such-id"));
+            () => _service.GetByIdAsync(UnknownId));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not-an-objectid")]
+    [InlineData("65f1a2b3")] // too short for a 24-hex ObjectId
+    public async Task GetByIdAsync_BlankOrMalformedId_ThrowsValidationNotMongoError(string id)
+    {
+        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.GetByIdAsync(id));
     }
 }

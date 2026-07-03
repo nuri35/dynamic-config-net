@@ -28,6 +28,10 @@ internal sealed class FakeConfigurationAdminRepository : IConfigurationAdminRepo
         }
     }
 
+    // Delegates to the production rule instead of inventing a fake one, so the
+    // service tests exercise the exact id semantics Mongo storage enforces.
+    public bool IsWellFormedId(string? id) => MongoConfigurationAdminRepository.IsWellFormedObjectId(id);
+
     public Task<IReadOnlyList<ConfigurationRecord>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult<IReadOnlyList<ConfigurationRecord>>(_recordsById.Values.ToList());

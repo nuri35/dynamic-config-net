@@ -16,8 +16,15 @@ public interface IConfigurationAdminService
     Task<ConfigurationRecord> GetByIdAsync(string id, CancellationToken cancellationToken = default);
 
     /// <summary>Validates and stores a new record, stamping <c>LastModifiedDate</c> (UTC).</summary>
+    /// <param name="record">The record to store. Its <c>IsActive</c> field is ignored —
+    /// <paramref name="isActive"/> is the only channel for that flag.</param>
+    /// <param name="isActive">The client's tri-state activity choice: <c>null</c> means
+    /// "not provided" and defaults to <c>true</c>. A separate nullable parameter because
+    /// the case-schema record's <c>IsActive</c> is a non-nullable <c>bool</c> and cannot
+    /// express omission.</param>
+    /// <param name="cancellationToken">Cancels the storage write.</param>
     /// <exception cref="Exceptions.ConfigurationValidationException">A business rule failed.</exception>
-    Task<ConfigurationRecord> CreateAsync(ConfigurationRecord record, CancellationToken cancellationToken = default);
+    Task<ConfigurationRecord> CreateAsync(ConfigurationRecord record, bool? isActive = null, CancellationToken cancellationToken = default);
 
     /// <summary>Validates and replaces an existing record, refreshing <c>LastModifiedDate</c> (UTC).</summary>
     /// <exception cref="Exceptions.ConfigurationValidationException">A business rule failed.</exception>

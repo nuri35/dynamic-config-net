@@ -35,15 +35,21 @@ public sealed class ConfigurationAdminService : IConfigurationAdminService
 
     public async Task<ConfigurationRecord> GetByIdAsync(string id, CancellationToken cancellationToken = default)
     {
+        EnsureWellFormedId(id);
+
         var record = await _repository.GetByIdAsync(id, cancellationToken);
         return record ?? throw new ConfigurationRecordNotFoundException(id);
     }
 
-    public async Task<ConfigurationRecord> CreateAsync(ConfigurationRecord record, CancellationToken cancellationToken = default)
+    public async Task<ConfigurationRecord> CreateAsync(ConfigurationRecord record, bool? isActive = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
         ValidateBusinessRules(record);
 
+        // Tri-state from the client: omitted means "make it live now" — a config
+        // created invisible-by-default surprises operators. Explicit false stays
+        // possible for staging a record ahead of activation.
+        record.IsActive = isActive ?? true;
         record.LastModifiedDate = DateTime.UtcNow;
         return await _repository.CreateAsync(record, cancellationToken);
     }
@@ -51,11 +57,7 @@ public sealed class ConfigurationAdminService : IConfigurationAdminService
     public async Task<ConfigurationRecord> UpdateAsync(ConfigurationRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
-        if (string.IsNullOrWhiteSpace(record.Id))
-        {
-            throw new ConfigurationValidationException("Id is required to update a configuration record.");
-        }
-
+        EnsureWellFormedId(record.Id);
         ValidateBusinessRules(record);
 
         record.LastModifiedDate = DateTime.UtcNow;
@@ -66,6 +68,25 @@ public sealed class ConfigurationAdminService : IConfigurationAdminService
         }
 
         return record;
+    }
+
+    /// <summary>
+    /// Rejects blank or malformed ids before any storage I/O — a garbage id must
+    /// surface as a validation failure (HTTP 400 in 4.2), not leak up as a Mongo
+    /// FormatException or masquerade as not-found. The format rule itself comes
+    /// from the repository, because id shape is storage knowledge.
+    /// </summary>
+    private void EnsureWellFormedId(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new ConfigurationValidationException("Id is required and cannot be blank.");
+        }
+
+        if (!_repository.IsWellFormedId(id))
+        {
+            throw new ConfigurationValidationException($"Id '{id}' is not a well-formed record id.");
+        }
     }
 
     /// <summary>

@@ -13,6 +13,13 @@ namespace DynamicConfig.WebUI.Storage;
 /// </summary>
 public interface IConfigurationAdminRepository
 {
+    /// <summary>
+    /// Whether <paramref name="id"/> is well-formed for this storage technology.
+    /// Lives on the repository because id format is storage knowledge (Mongo:
+    /// 24-hex ObjectId) — the service uses it to reject bad ids before any I/O.
+    /// </summary>
+    bool IsWellFormedId(string? id);
+
     /// <summary>All records across every application, inactive ones included.</summary>
     Task<IReadOnlyList<ConfigurationRecord>> GetAllAsync(CancellationToken cancellationToken = default);
 

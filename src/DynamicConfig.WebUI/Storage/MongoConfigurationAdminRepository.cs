@@ -27,6 +27,12 @@ public sealed class MongoConfigurationAdminRepository : IConfigurationAdminRepos
     }
 
     /// <inheritdoc />
+    public bool IsWellFormedId(string? id) => IsWellFormedObjectId(id);
+
+    /// <summary>Static so the well-formedness rule is testable without a database.</summary>
+    internal static bool IsWellFormedObjectId(string? id) => ObjectId.TryParse(id, out _);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ConfigurationRecord>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         // Admin view: no ApplicationName/IsActive filtering — that narrowing is the
