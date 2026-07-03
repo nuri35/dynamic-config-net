@@ -151,6 +151,41 @@ Frontend behavior is specified by the API tests (see the no-JS-test-framework de
 - Field-level error: submitting `Type=int, Value=abc` → 400 → message rendered under the Value input (`fieldName` extension consumed).
 - Filter: typing narrows the table with zero network requests (code inspection: the input handler is `renderTable`, which contains no `fetch`; `fetch` appears only in `fetchAllRecords` and `submitForm`).
 
+## End-to-end smoke pass (manual test script — rerunnable on the compose stack)
+
+Executed 2026-07-03 against the final CORE state: real browser (UI driven through the actual form/filter handlers), MongoDB up, `DemoService` running as a live library consumer. This section doubles as the manual script for rerunning on the full docker-compose ecosystem.
+
+**Setup**
+
+1. Exactly ONE MongoDB on `localhost:27017` — see the environment finding below.
+2. `dotnet run --project src/DynamicConfig.WebUI --urls http://localhost:5188`
+3. `dotnet run --project src/DynamicConfig.DemoService --urls http://localhost:5189` (defaults: `SERVICE-A`, 5000 ms; override via `DynamicConfig:ApplicationName`, `ConnectionStrings:Mongo`, `DynamicConfig:RefreshTimerIntervalInMs`)
+
+**DemoService observation surface** (added for this pass, deliberately tiny): a console line every 2 s plus `GET /` returning the same probes as JSON. The fixed probe set demonstrates one contract face per key — `SiteName`/`MaxItemCount` (own active → served), `PromoBanner` (created mid-demo → appears), `LegacyFlag` (own but inactive → absent), `IsBasketEnabled` (SERVICE-B's → absent). A missing key prints `(absent)` via the expected `ConfigurationKeyNotFoundException`.
+
+**PART A — UI (all via the real browser)**
+
+| # | Scenario | Expected | Observed | Result |
+|---|---|---|---|---|
+| A1 | Page load | `/`, `app.js`, `style.css`, `/swagger` all 200; header links Swagger | All 200; header link `/swagger` | PASS |
+| A2 | Create one record per type + IsActive variants | All four types render; unchecked variant shows muted row + Inactive badge | `string/int/double/bool` created via the form; `LegacyFlag` (unchecked) muted + badged | PASS |
+| A3 | Validation + form retention | `int`/`abc` → red error under **Value**; blank Name → error under **Name**; failed submit loses no input | Both errors under the exact inputs (service `fieldName` chain AND DataAnnotations `errors` map); every field value retained | PASS |
+| A4 | Edit + IsActive persistence both directions | value change persists; uncheck→save→reopen→still unchecked; recheck→save→active | `CacheRatio` 1.5→2.5 persisted; checkbox round-trip false→true persisted (the exact channel of the earlier smoke bug — now dead) | PASS |
+| A5 | Edit race (record gone mid-edit) | 404 → clear message + list refresh, no ghost row | Form closed, "record no longer exists" message, list refreshed, no ghost. *Simulated by pointing the open form's `data-record-id` at a nonexistent id — CORE has no DELETE endpoint (deliberate scope); the server 404 is genuine. On the compose rerun, delete via `mongosh` inside the container instead.* | PASS |
+| A6 | Filter, zero requests, case-insensitive | Narrows/restores with no `/api/` traffic; upper/lower query hit the same row | Network log armed before typing recorded **zero** `/api/` requests; `sitename` and `SITENAME` both matched `SiteName`; clear restored all rows | PASS |
+
+**PART B — live library consumer**
+
+| # | Scenario | Expected | Observed | Result |
+|---|---|---|---|---|
+| B7 | Seed via UI only | Records for two applications + one inactive land through the full write path | SERVICE-A: `SiteName`, `MaxItemCount=50`, `CacheRatio`, `LegacyFlag` (inactive); SERVICE-B: `IsBasketEnabled` | PASS |
+| B8 | Startup isolation | DemoService (SERVICE-A) serves ONLY its own active records | `SiteName=soty.io MaxItemCount=50`; `LegacyFlag` and `IsBasketEnabled` `(absent)` — IsActive filtering + application isolation proven through the live reader | PASS |
+| B9 | Live value update | UI edit visible within one poll interval, no restart | Saved 13:03:05 → served `MaxItemCount=100` at 13:03:13 | PASS |
+| B10 | New key + deactivation mid-flight | Appears within one interval; IsActive flip removes it | `PromoBanner` created 13:03:37 → served by 13:03:55; deactivated 13:04:09 → `(absent)` on the next observations | PASS |
+| B11 | Storage outage + recovery | GetValue keeps serving last snapshot; UI write fails gracefully; restart → automatic recovery | Mongo stopped 13:09:32 (port verified closed): 6+ missed polls, values kept serving, no crash; write attempt → generic `500` ProblemDetails after the driver timeout, nothing leaked; Mongo restarted 13:11:08 → UI edit 13:11:21 → DemoService serving `123` at 13:11:37 | PASS |
+
+**Environment finding (not a code defect — critical for reruns):** the first outage attempt appeared to "empty" the snapshot. Root cause: TWO MongoDB instances — the native Windows `MongoDB` service bound to `127.0.0.1:27017` and the compose `dynamicconfig-mongo` container port-proxied on `0.0.0.0:27017`. When the native service stopped, connections to `localhost:27017` silently failed over to the container's EMPTY database; the poll *succeeded* with zero records, and the library correctly swapped in what storage returned. The library's contract distinguishes "storage unreachable" (keep last-good) from "storage says you have no records" (believe it) — both behaviors are correct. Lesson pinned here for the compose rerun: never run the compose mongo and a native mongod side by side; the outage drill requires the single real instance to be the one stopped.
+
 ## Deviations from plan
 
 One addition beyond the planned scope: the smoke-caught update-path `IsActive` fix described above touched 4.1's service (`UpdateAsync` signature) and 4.2's controller (one argument). No broker code, no framework, no JS test tooling; the `/` → `/swagger` redirect from 4.2 was replaced by the UI as planned (Swagger remains reachable and linked).
