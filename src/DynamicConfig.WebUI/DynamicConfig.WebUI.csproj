@@ -4,6 +4,12 @@
     <ProjectReference Include="..\DynamicConfig.Library\DynamicConfig.Library.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Same trade as the library: tests reach internal seams (id-filter builder)
+         without making them part of the public surface. -->
+    <InternalsVisibleTo Include="DynamicConfig.WebUI.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>

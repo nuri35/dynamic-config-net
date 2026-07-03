@@ -9,9 +9,12 @@ namespace DynamicConfig.Library.Storage.Mongo;
 /// <summary>
 /// Registers the BSON mapping for <see cref="ConfigurationRecord"/>.
 /// Mapping is code-based (BsonClassMap) instead of attributes so the domain model
-/// stays free of MongoDB dependencies (see ADR 0003).
+/// stays free of MongoDB dependencies (see ADR 0003). Public because any component
+/// persisting the same documents (the WebUI's admin repository) must use this exact
+/// mapping — a second, hand-written map could drift and silently corrupt data
+/// (e.g. Id stored as string instead of ObjectId).
 /// </summary>
-internal static class MongoConfigurationClassMap
+public static class MongoConfigurationClassMap
 {
     /// <summary>
     /// Registers the class map exactly once per process. Safe to call from multiple
@@ -19,7 +22,7 @@ internal static class MongoConfigurationClassMap
     /// init, .NET static state can be raced, so we rely on the driver's thread-safe
     /// TryRegisterClassMap rather than a check-then-register of our own.
     /// </summary>
-    internal static void EnsureRegistered()
+    public static void EnsureRegistered()
     {
         BsonClassMap.TryRegisterClassMap<ConfigurationRecord>(classMap =>
         {

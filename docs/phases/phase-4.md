@@ -1,0 +1,71 @@
+# Phase 4 — Web UI (REST + Frontend)
+
+Phase 4 is delivered in three sub-phases, each with its own commit and quality gates:
+
+| Sub-phase | Scope | Status |
+|---|---|---|
+| 4.1 | WebUI backend: admin repository & service layer | done |
+| 4.2 | REST API: controllers/endpoints, DTOs, HTTP error mapping | pending |
+| 4.3 | Frontend: list/add/update UI, client-side name filter | pending |
+
+## Out of scope — deliberate: authentication/authorization
+
+The case does not require authentication or authorization, so this admin surface ships without it — that is scope discipline under a 2-day deadline, not an oversight. In production, an admin UI that can change every service's runtime configuration would never be exposed bare: it would sit behind a reverse proxy with SSO, or use ASP.NET Core Identity / JWT bearer auth with an admin role. The service/repository split made in 4.1 keeps that retrofit cheap — auth is a concern for the (4.2) HTTP edge, and no business rule below it would change.
+
+---
+
+# Phase 4.1 — WebUI Backend: Admin Repository & Service Layer
+
+**Status:** done · **Completed:** 2026-07-03 · **Commit:** `feat(phase-4.1): webui admin repository and service layer with write-side validation` (single phase commit)
+
+## Goal
+
+Give the WebUI its own backend: an admin data-access layer over the same Mongo collection the library reads, and a service layer owning every write-path business rule (validation, timestamp stamping, not-found semantics) so the Phase 4.2 controllers can stay thin. No controllers, no DTOs, no HTTP surface, no frontend in this sub-phase.
+
+## What was built
+
+- **`IConfigurationAdminRepository` + `MongoConfigurationAdminRepository`** (`src/DynamicConfig.WebUI/Storage/`) — the WebUI's own data-access contract: `GetAllAsync` (every application, inactive records included), `GetByIdAsync`, `CreateAsync`, `UpdateAsync`. Async end-to-end, `CancellationToken` flowing through every call, `ConfigureAwait(false)` on I/O. Reads/writes the exact collection the library polls, via the library's now-public `MongoConfigurationStorageDefaults` (names) and `MongoConfigurationClassMap` (BSON mapping). A malformed ObjectId is treated as not-found rather than a `FormatException`.
+- **`IConfigurationAdminService` + `ConfigurationAdminService`** (`src/DynamicConfig.WebUI/Services/`) — business rules:
+  - `Name` and `ApplicationName` required, non-blank.
+  - Declared `Type` must be one of the four supported types (`ConfigurationValueTypes.TryParse` — same parser the readers use).
+  - `Value` must be parseable as the declared `Type` (`Type=int, Value="abc"` → rejected) — via the library's `ConfigurationValueParser`.
+  - `CreateAsync`/`UpdateAsync` stamp `LastModifiedDate = DateTime.UtcNow`; the service — not callers, not storage — owns that field.
+  - Update/read of a missing id → `ConfigurationRecordNotFoundException`; validation failure → `ConfigurationValidationException` (HTTP mapping lands in 4.2).
+- **`ConfigurationValueParser`** (library, `Conversion/`) — extracted the raw parse checks (invariant-culture int/double, 1/0 + true/false bool) out of `ConfigurationValueConverter` into a public class; the converter now delegates to it, adding only the read-path failure semantics (`ConfigurationValueFormatException`).
+- **DI wiring** (`Program.cs`) — singleton `IMongoDatabase` (one `MongoClient` per process, per driver guidance), repository and service registrations, connection string from `ConnectionStrings:Mongo` with the same database-name fallback rule the library uses. No endpoints beyond a placeholder root.
+- **Tests** — new `tests/DynamicConfig.WebUI.Tests` project (34 tests) with a hand-rolled `FakeConfigurationAdminRepository` (same idiom as the library tests), plus 27 new library tests for `ConfigurationValueParser`. 130 total, all green, zero database dependency.
+
+## Key decisions
+
+- **Admin repository vs. library provider — two bounded contexts, not one interface.** The library's `IConfigurationStorageProvider` is a *consumer* contract: one application's records, active only, read-only — that narrowing IS the case's isolation requirement. The WebUI needs an *admin* contract: every application, inactive included, read-write. Extending the provider would force admin capabilities onto every consuming service and dilute the isolation guarantee; instead the WebUI owns `IConfigurationAdminRepository`, and the two contexts meet only at the shared collection. Not raised to an ADR: it composes with ADR 0003 rather than revising it.
+- **Single source of truth for type/value parsing.** The service validates `Value` against `Type` with the very code that parses on the read path (`ConfigurationValueTypes` + the extracted `ConfigurationValueParser`). Duplicating the tolerant parse rules in the WebUI would let "valid to write" drift from "parseable to read" — the exact bug class this phase exists to prevent.
+- **Shared storage constants and BSON map instead of grep-verified duplicates.** `MongoConfigurationStorageDefaults` and `MongoConfigurationClassMap` went `internal` → `public` so the admin repository references them directly: a collection-name or Id-serialization mismatch (which would silently break the end-to-end story) is now impossible at compile time. The case-frozen public surface (`ConfigurationReader` ctor + `GetValue<T>`) and `IConfigurationStorageProvider` are untouched.
+- **`LastModifiedDate` is owned by the service write path.** The library's duplicate resolution and change detection order records by `LastModifiedDate`; a stale timestamp on update would make consumers keep serving the old value. Stamping happens in `ConfigurationAdminService` on both create and update, in UTC, and is pinned by test.
+- **Write-side prevention + read-side defense.** The service validation prevents the UI from ever writing a record whose `Value` can't be read as its `Type`; the library's `ConfigurationValueFormatException` remains the safety net for records that bypass the UI (manual Mongo edits, external tools). Complementary layers, not redundancy.
+- **Repository returns `bool` on update; the service decides it means not-found.** Storage reports facts (`MatchedCount > 0` — matched, not modified: a no-change save is still a successful update); business meaning stays in the service layer.
+
+## Test coverage
+
+`dotnet test` → 130/130 green (96 library + 34 WebUI), zero database dependency. New behavior proven:
+
+- **Validation matrix (create):** all four types accepted with parseable values (including the case PDF's `"Int"` casing and `1`/`0` booleans); unsupported types (`decimal`, `date`, blank) rejected; corrupt values per type (`int/"abc"`, `int/"1.5"`, `double/"1,5"` tr-TR comma, `bool/"yes"`, `bool/"2"`) rejected with messages carrying both the value and the type; blank `Name`/`ApplicationName` rejected; an invalid record provably never reaches the repository.
+- **Timestamp ownership:** create stamps `LastModifiedDate` with current UTC; update *refreshes* it even when the caller supplies a stale date (the load-bearing test), asserted on `DateTimeKind.Utc` and an in-range wall-clock window.
+- **Not-found paths:** update with unknown id and get-by-id with unknown id both throw `ConfigurationRecordNotFoundException` carrying the id.
+- **Admin breadth:** `GetAllAsync` returns inactive records and foreign applications — no consumer-style narrowing.
+- **Repository filter logic:** `BuildIdFilter` renders as `{ _id: ObjectId(...) }` under the shared class map (a string-typed comparison would silently match nothing). Mongo CRUD plumbing is deliberately untested at unit level — mocking `IMongoCollection` internals is low value; end-to-end behavior is covered when the UI runs against the compose stack.
+- **Parser extraction:** 27 tests pin `ConfigurationValueParser.IsParseableAs` per type (invariant culture, 1/0 booleans, null never parseable); the existing 69 library tests prove the converter refactor changed nothing on the read path.
+
+## Deviations from plan
+
+- **Shared constants instead of duplicated-and-grepped ones:** the plan suggested grep-verifying that WebUI and library collection/db constants agree; making the library's storage constants and class map public removes the duplication entirely, so the grep now shows a single constant referenced from both sides. Chosen because it turns a silent runtime failure mode into a compile-time impossibility; flagged for review in the phase summary.
+- Everything else matched scope: no controllers/DTOs/HTTP, no frontend, no broker code, `IConfigurationStorageProvider` untouched.
+
+---
+
+# Phase 4.2 — REST API *(pending)*
+
+Controllers/endpoints over `IConfigurationAdminService`, DTOs, HTTP error mapping (`ConfigurationValidationException` → 400, `ConfigurationRecordNotFoundException` → 404).
+
+# Phase 4.3 — Frontend *(pending)*
+
+List/add/update UI with client-side name filtering.

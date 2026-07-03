@@ -38,6 +38,8 @@ flowchart LR
 | `IConfigurationStorageProvider` | `DynamicConfig.Library` | Storage abstraction (Strategy/Repository). One method surface for "fetch my active records". |
 | `MongoConfigurationStorageProvider` | `DynamicConfig.Library` | Mongo implementation; `(ApplicationName, IsActive)` compound index; the isolation filter lives in the query. |
 | WebUI | `DynamicConfig.WebUI` | REST API + minimal frontend: list/add/update records, client-side name filter. |
+| `IConfigurationAdminRepository` | `DynamicConfig.WebUI` | The WebUI's own admin data-access contract over the same Mongo collection — all applications, inactive included, read-write. Deliberately separate from `IConfigurationStorageProvider` (consumer contract: app-scoped, active-only, read-only); collection name and BSON mapping are shared via the library's public storage constants/class map. |
+| `ConfigurationAdminService` | `DynamicConfig.WebUI` | Write-path business rules: required names, Type must be supported, Value must parse as Type (via the library's `ConfigurationValueParser` — same code as the read path), UTC `LastModifiedDate` stamping, not-found semantics. |
 | DemoService | `DynamicConfig.DemoService` | Proof-of-consumption: boots with the library and exposes its live config values. |
 
 ## Data Flows (CORE)
@@ -69,6 +71,10 @@ sequenceDiagram
         end
     end
 ```
+
+### Write path (admin, Phase 4.1)
+
+WebUI create/update → `ConfigurationAdminService` validates (names required, Type supported, Value parseable as Type) and stamps `LastModifiedDate` (UTC) → `MongoConfigurationAdminRepository` inserts/replaces by `_id` in the same collection the pollers read. Invalid records are rejected *before* storage (write-side prevention); the library's `ConfigurationValueFormatException` remains the read-side net for records written past the UI.
 
 ## Failure Modes (CORE)
 

@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Globalization;
 using DynamicConfig.Library.Exceptions;
 using DynamicConfig.Library.Models;
 
@@ -49,31 +48,21 @@ internal static class ConfigurationValueConverter
         };
     }
 
+    // Parsing itself lives in ConfigurationValueParser (shared with the WebUI's
+    // write-side validation); this class only adds the read-path failure semantics —
+    // a corrupt stored value surfaces as ConfigurationValueFormatException.
     private static int ParseInt(ConfigurationRecord record) =>
-        int.TryParse(record.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+        ConfigurationValueParser.TryParseInt(record.Value, out var parsed)
             ? parsed
             : throw new ConfigurationValueFormatException(record.Name, record.Type, record.Value);
 
-    // InvariantCulture is non-negotiable: stored values use '.' as the decimal separator,
-    // and machine-locale parsing (e.g. tr-TR, where ',' is the separator) would corrupt
-    // or reject "1.5" depending on the host's regional settings.
     private static double ParseDouble(ConfigurationRecord record) =>
-        double.TryParse(record.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+        ConfigurationValueParser.TryParseDouble(record.Value, out var parsed)
             ? parsed
             : throw new ConfigurationValueFormatException(record.Name, record.Type, record.Value);
 
-    // The case PDF's own sample stores booleans as 1/0, its prose uses true/false —
-    // accept both spellings (case-insensitively, via bool.TryParse) like the Type parser.
-    private static bool ParseBool(ConfigurationRecord record)
-    {
-        var normalizedValue = record.Value.Trim();
-        return normalizedValue switch
-        {
-            "1" => true,
-            "0" => false,
-            _ => bool.TryParse(normalizedValue, out var parsed)
-                ? parsed
-                : throw new ConfigurationValueFormatException(record.Name, record.Type, record.Value),
-        };
-    }
+    private static bool ParseBool(ConfigurationRecord record) =>
+        ConfigurationValueParser.TryParseBool(record.Value, out var parsed)
+            ? parsed
+            : throw new ConfigurationValueFormatException(record.Name, record.Type, record.Value);
 }

@@ -78,6 +78,8 @@ Every architectural decision is captured as an ADR in [`docs/adr/`](docs/adr/); 
 - **Broker (RabbitMQ)** adds *low latency*: a fanout `config-changed` event refreshes every subscribed reader within milliseconds of a UI change. Events are signals, not state — MongoDB stays the single source of truth.
 - Each covers the other's weakness: broker down → polling still converges; long poll interval → broker still delivers instant updates.
 
+> **Note — no authentication (deliberate):** the case does not require auth, so the admin UI ships without it; in production this surface would sit behind a reverse proxy with SSO or ASP.NET Core Identity/JWT. See [phase-4.md](docs/phases/phase-4.md).
+
 ## Usage
 
 ```csharp
