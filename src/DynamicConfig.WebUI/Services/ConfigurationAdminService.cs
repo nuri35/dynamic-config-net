@@ -80,12 +80,12 @@ public sealed class ConfigurationAdminService : IConfigurationAdminService
     {
         if (string.IsNullOrWhiteSpace(id))
         {
-            throw new ConfigurationValidationException("Id is required and cannot be blank.");
+            throw ConfigurationValidationException.RequiredFieldMissing(nameof(ConfigurationRecord.Id));
         }
 
         if (!_repository.IsWellFormedId(id))
         {
-            throw new ConfigurationValidationException($"Id '{id}' is not a well-formed record id.");
+            throw ConfigurationValidationException.MalformedId(id);
         }
     }
 
@@ -97,24 +97,22 @@ public sealed class ConfigurationAdminService : IConfigurationAdminService
     {
         if (string.IsNullOrWhiteSpace(record.Name))
         {
-            throw new ConfigurationValidationException("Name is required and cannot be blank.");
+            throw ConfigurationValidationException.RequiredFieldMissing(nameof(ConfigurationRecord.Name));
         }
 
         if (string.IsNullOrWhiteSpace(record.ApplicationName))
         {
-            throw new ConfigurationValidationException("ApplicationName is required and cannot be blank.");
+            throw ConfigurationValidationException.RequiredFieldMissing(nameof(ConfigurationRecord.ApplicationName));
         }
 
         if (!ConfigurationValueTypes.TryParse(record.Type, out var declaredType))
         {
-            throw new ConfigurationValidationException(
-                $"Type '{record.Type}' is not supported. Supported types: string, int, double, bool.");
+            throw ConfigurationValidationException.UnsupportedType(record.Type);
         }
 
         if (!ConfigurationValueParser.IsParseableAs(declaredType, record.Value))
         {
-            throw new ConfigurationValidationException(
-                $"Value '{record.Value}' cannot be parsed as the declared type '{record.Type}'.");
+            throw ConfigurationValidationException.ValueTypeMismatch(record.Value, record.Type);
         }
     }
 }

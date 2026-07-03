@@ -69,7 +69,13 @@ public class ConfigurationAdminServiceTests
     {
         var record = BuildValidRecord(type: type);
 
-        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.CreateAsync(record));
+        var exception = await Assert.ThrowsAsync<ConfigurationValidationException>(
+            () => _service.CreateAsync(record));
+
+        Assert.Equal(nameof(ConfigurationRecord.Type), exception.FieldName);
+        // The supported list is derived from the enum — the message can never lie
+        // about what the library actually accepts.
+        Assert.Contains("string, int, double, bool", exception.Message);
     }
 
     [Theory]
@@ -86,9 +92,11 @@ public class ConfigurationAdminServiceTests
         var exception = await Assert.ThrowsAsync<ConfigurationValidationException>(
             () => _service.CreateAsync(record));
 
-        // The message must carry enough context for the UI to show a useful error.
+        // The message must carry enough context for the UI to show a useful error,
+        // and FieldName lets 4.2 attach it to the right form field.
         Assert.Contains(value, exception.Message);
         Assert.Contains(type, exception.Message);
+        Assert.Equal(nameof(ConfigurationRecord.Value), exception.FieldName);
     }
 
     [Theory]
@@ -98,7 +106,10 @@ public class ConfigurationAdminServiceTests
     {
         var record = BuildValidRecord(name: name);
 
-        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.CreateAsync(record));
+        var exception = await Assert.ThrowsAsync<ConfigurationValidationException>(
+            () => _service.CreateAsync(record));
+
+        Assert.Equal(nameof(ConfigurationRecord.Name), exception.FieldName);
     }
 
     [Theory]
@@ -108,7 +119,10 @@ public class ConfigurationAdminServiceTests
     {
         var record = BuildValidRecord(applicationName: applicationName);
 
-        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.CreateAsync(record));
+        var exception = await Assert.ThrowsAsync<ConfigurationValidationException>(
+            () => _service.CreateAsync(record));
+
+        Assert.Equal(nameof(ConfigurationRecord.ApplicationName), exception.FieldName);
     }
 
     [Fact]
@@ -230,7 +244,10 @@ public class ConfigurationAdminServiceTests
     {
         var record = BuildValidRecord(id: id);
 
-        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.UpdateAsync(record));
+        var exception = await Assert.ThrowsAsync<ConfigurationValidationException>(
+            () => _service.UpdateAsync(record));
+
+        Assert.Equal(nameof(ConfigurationRecord.Id), exception.FieldName);
     }
 
     [Fact]
@@ -240,7 +257,10 @@ public class ConfigurationAdminServiceTests
         // storage FormatException, and not masquerade as a 404-style not-found.
         var record = BuildValidRecord(id: "not-an-objectid");
 
-        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.UpdateAsync(record));
+        var exception = await Assert.ThrowsAsync<ConfigurationValidationException>(
+            () => _service.UpdateAsync(record));
+
+        Assert.Equal(nameof(ConfigurationRecord.Id), exception.FieldName);
 
         Assert.Null(_repository.LastUpdatedRecord); // rejected before any storage call
     }
@@ -302,6 +322,9 @@ public class ConfigurationAdminServiceTests
     [InlineData("65f1a2b3")] // too short for a 24-hex ObjectId
     public async Task GetByIdAsync_BlankOrMalformedId_ThrowsValidationNotMongoError(string id)
     {
-        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.GetByIdAsync(id));
+        var exception = await Assert.ThrowsAsync<ConfigurationValidationException>(
+            () => _service.GetByIdAsync(id));
+
+        Assert.Equal(nameof(ConfigurationRecord.Id), exception.FieldName);
     }
 }
