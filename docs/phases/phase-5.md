@@ -1,6 +1,6 @@
 # Phase 5 — RabbitMQ Instant Refresh (EXTRA)
 
-**Status:** in progress · **Kickoff (docs-only):** 2026-07-03 · **Commit:** `docs(phase-5): ratify broker architecture (ADR 0005) — no code`
+**Status:** COMPLETE (5.1 publisher + 5.2 consumer + 5.3 e2e proof) · **Kickoff (docs-only):** 2026-07-03 · **Closed:** 2026-07-03
 
 ## Goal
 
@@ -101,3 +101,35 @@ Both reserved questions were resolved by the user at kickoff: (1) broker address
 ## Deviations from plan
 
 None beyond the pre-flagged shared-kernel move (exchange constant + wire contract into the library, per the user's instruction). The frozen surface is character-identical; compose untouched beyond 5.1's rabbitmq service; no e2e demo pass (that's 5.3).
+
+---
+
+# Phase 5.3 — Broker End-to-End Proof + Phase 5 Closure
+
+**Status:** done · **Completed:** 2026-07-03 · **Commit:** `test(phase-5.3): broker end-to-end verification` (+ one smoke-caught fix, see below)
+
+Verification phase: the system as built (5.1 publisher + 5.2 consumer) run live — docker mongo + rabbitmq (preflight confirmed docker-only listeners on 27017/5672; native RabbitMQ service verified stopped), WebUI, DemoService with `DYNAMIC_CONFIG_RABBITMQ_URI`, **30 000 ms** poll interval so broker wins are unambiguous.
+
+| # | Scenario | Expected | Observed | Result |
+|---|---|---|---|---|
+| A1–A2 | Stack up, consumer attaches | Exclusive queue bound to the fanout | 1 server-named `amq.gen-*` queue bound (mgmt API); DemoService serving | PASS |
+| A3 | UI edit, broker path | Sub-second-ish, well under 30 s floor | 2 528 ms first edit (includes publisher lazy first-connect); steady-state below | PASS |
+| A4 | Foreign-app edit (SERVICE-B) | SERVICE-A demo does not refresh | Value unchanged through a 3 s observation window (silent drop) | PASS |
+| A5 | New key create + deactivate via UI | Both propagate near-instantly | Create→served **125 ms**; deactivate→absent 1 145 ms | PASS |
+| B6 | Broker stopped mid-run | Write still succeeds + warning; polling carries ≤1 interval | HTTP 200 in 841 ms, 1 warning logged, old value kept serving, change arrived via polling in **15.2 s** (≤30 s) | PASS |
+| B7 | Broker restart | Both sides self-heal, no process restarts | Consumer re-bound (auto-recovery), post-recovery edit served in 1 297 ms | PASS |
+| B8 | Env var absent | Polling-only, zero broker connections | 0 AMQP sockets from the process; serving at poll cadence | PASS* |
+| C9 | Rapid-fire 6 updates | No crash, final value correct | Final value served **66 ms** after the last write | PASS |
+| C10 | 4 malformed messages injected onto the exchange | Log+drop, keep consuming | Demo alive; next real event served in **31 ms** | PASS |
+| C11 | Broker down at DemoService boot | Ctor does not throw, polling-only | No throw, serving normally; see nuance below | PASS |
+| — | Post-fix steady state | — | Broker path **6 ms** end-to-end vs 30 000 ms floor (vs ~8 s polling story in the Phase 4 e2e) | — |
+
+**\*B8 test-setup finding (not a code defect):** plain `dotnet run` auto-applies `launchSettings.json`, which has carried `DYNAMIC_CONFIG_RABBITMQ_URI` since 5.2 — the first "no env var" run silently got the variable from the launch profile and connected. A true polling-only run needs `--no-launch-profile` (or an unset in the profile). Recorded here as the invisible-contract warning made concrete.
+
+**C11 nuance (behavior matches docs; made precise here):** the consumer makes exactly ONE `StartAsync` attempt — there is no retry loop after a conclusively failed boot connection (polling-only until process restart, consistent with the no-retry-machinery decision). Observed live: a *brief* outage spanning boot ended with the consumer attached once the broker returned, because the single in-flight connection attempt outlasted the outage — an attempt window, not a retry mechanism.
+
+## Smoke-caught fix: publisher ghost connection
+
+After the B6→B7 outage cycle the WebUI held **two** AMQP connections. Root cause: two recovery mechanisms fighting — the publisher's rebuild-on-next-publish disposed the dead connection, but `AutomaticRecoveryEnabled` resurrected the disposed object when the broker returned (one leaked ghost per outage cycle). Fix where the defect lives: the **publisher** factory now sets `AutomaticRecoveryEnabled = false` (manual rebuild is its single mechanism); the **consumer** keeps auto-recovery (its only mechanism — it never disposes mid-life). No unit pin: the defect lives in AMQP connection lifecycle, deliberately not mocked (5.1 precedent); proof is the live re-drill — full outage cycle now ends with exactly **1** publisher connection, writes 200 throughout, post-fix broker path 6 ms. 187/187 tests stay green.
+
+**Phase 5 COMPLETE** — hybrid refresh implemented, documented and live-verified in both directions of failure. Frozen surface re-confirmed character-identical.

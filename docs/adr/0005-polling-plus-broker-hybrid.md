@@ -1,6 +1,6 @@
 # ADR 0005: Polling + Message Broker Hybrid Refresh
 
-- **Status:** Accepted — ratified 2026-07-03 at the Phase 5 kickoff (docs-first; implementation follows this document)
+- **Status:** Accepted — implemented & live-verified 2026-07-03 (Phase 5.3 e2e: steady-state broker path 6–125 ms vs 30 s poll floor; both failure directions drilled — see [phase-5.md](../phases/phase-5.md))
 - **Date:** 2026-07-02 (drafted in Phase 0 planning) · ratified 2026-07-03
 
 ## Context

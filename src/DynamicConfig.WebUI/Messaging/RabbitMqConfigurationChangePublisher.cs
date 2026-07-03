@@ -32,7 +32,14 @@ public sealed class RabbitMqConfigurationChangePublisher : IConfigurationChangeP
         _connectionFactory = new ConnectionFactory
         {
             Uri = new Uri(amqpUri),
-            AutomaticRecoveryEnabled = true,
+            // Deliberately NO AutomaticRecoveryEnabled: this publisher already
+            // rebuilds a dead channel/connection on the next publish. Running the
+            // client's recovery loop AS WELL leaks a ghost connection per outage
+            // cycle — the disposed connection's recovery resurrects it alongside
+            // the rebuilt one (5.3 smoke finding). One recovery mechanism only;
+            // the CONSUMER keeps AutomaticRecoveryEnabled because recovery is its
+            // only mechanism and it never disposes mid-life.
+            AutomaticRecoveryEnabled = false,
         };
     }
 
