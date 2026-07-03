@@ -2,6 +2,16 @@
 
 A reusable .NET 8 class library that replaces static configuration files (`appsettings.json`, `web.config`, `app.config`) with a **live, storage-backed configuration system**. Configuration values are stored in MongoDB, managed through a web UI, and picked up by running services **without any deployment, restart, or recycle**. Each service sees only its own active configuration records, and the library keeps working from its last known-good snapshot even when storage goes down.
 
+<p align="center">
+  <img src="docs/images/ui-main.png" alt="Admin UI — configuration records across all applications with status indicators" width="900" />
+  <br/><em>Admin UI — all applications, status at a glance</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/ui-form-validation.png" alt="Create form showing a field-level validation error under the Value input" width="900" />
+  <br/><em>Field-level validation via RFC 7807 <code>fieldName</code> — the error lands under the exact input</em>
+</p>
+
 ## Architecture
 
 ```mermaid
