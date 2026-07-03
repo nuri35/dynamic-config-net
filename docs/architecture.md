@@ -40,6 +40,9 @@ flowchart LR
 | WebUI | `DynamicConfig.WebUI` | REST API + minimal frontend: list/add/update records, client-side name filter. |
 | `IConfigurationAdminRepository` | `DynamicConfig.WebUI` | The WebUI's own admin data-access contract over the same Mongo collection — all applications, inactive included, read-write. Deliberately separate from `IConfigurationStorageProvider` (consumer contract: app-scoped, active-only, read-only); collection name and BSON mapping are shared via the library's public storage constants/class map. |
 | `ConfigurationAdminService` | `DynamicConfig.WebUI` | Write-path business rules: required names, Type must be supported, Value must parse as Type (via the library's `ConfigurationValueParser` — same code as the read path), UTC `LastModifiedDate` stamping, not-found semantics. |
+| `ConfigurationsController` | `DynamicConfig.WebUI` | Thin REST shell (`/api/configurations`): bind DTO → service call → wrap. No try/catch, no business checks. Swagger-documented at `/swagger`. |
+| `GlobalExceptionHandler` | `DynamicConfig.WebUI` | The one exception→HTTP mapping (.NET 8 `IExceptionHandler`): validation → 400 + `fieldName`, not-found → 404 + `recordId`, unexpected → 500 leaking nothing. RFC 7807 ProblemDetails throughout. |
+| Contracts (DTOs) | `DynamicConfig.WebUI` | The entity never crosses HTTP. Write requests: required fields via DataAnnotations, `IsActive` nullable (tri-state), no `Id`/`LastModifiedDate` properties (server-owned by type). Response carries the full read shape. |
 | DemoService | `DynamicConfig.DemoService` | Proof-of-consumption: boots with the library and exposes its live config values. |
 
 ## Data Flows (CORE)
@@ -72,9 +75,9 @@ sequenceDiagram
     end
 ```
 
-### Write path (admin, Phase 4.1)
+### Write path (admin, Phase 4.1 + 4.2)
 
-WebUI create/update → `ConfigurationAdminService` validates (names required, Type supported, Value parseable as Type) and stamps `LastModifiedDate` (UTC) → `MongoConfigurationAdminRepository` inserts/replaces by `_id` in the same collection the pollers read. Invalid records are rejected *before* storage (write-side prevention); the library's `ConfigurationValueFormatException` remains the read-side net for records written past the UI.
+HTTP client → `ConfigurationsController` (DataAnnotations reject shape garbage with an automatic 400) → `ConfigurationAdminService` validates semantics (names required, Type supported, Value parseable as Type) and stamps `LastModifiedDate` (UTC) → `MongoConfigurationAdminRepository` inserts/replaces by `_id` in the same collection the pollers read. Failures surface through `GlobalExceptionHandler` as RFC 7807 ProblemDetails (400 + `fieldName` / 404 + `recordId` / 500 generic). Invalid records are rejected *before* storage (write-side prevention); the library's `ConfigurationValueFormatException` remains the read-side net for records written past the UI.
 
 ## Failure Modes (CORE)
 

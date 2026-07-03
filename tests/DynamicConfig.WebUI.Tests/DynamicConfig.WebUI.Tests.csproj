@@ -24,4 +24,10 @@
     <ProjectReference Include="..\..\src\DynamicConfig.WebUI\DynamicConfig.WebUI.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Controller/handler tests use ASP.NET Core types (ControllerBase results,
+         DefaultHttpContext); a plain test project needs the shared framework opt-in. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>

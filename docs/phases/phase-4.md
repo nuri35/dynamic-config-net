@@ -5,7 +5,7 @@ Phase 4 is delivered in three sub-phases, each with its own commit and quality g
 | Sub-phase | Scope | Status |
 |---|---|---|
 | 4.1 | WebUI backend: admin repository & service layer | done |
-| 4.2 | REST API: controllers/endpoints, DTOs, HTTP error mapping | pending |
+| 4.2 | REST API: controllers/endpoints, DTOs, HTTP error mapping | done |
 | 4.3 | Frontend: list/add/update UI, client-side name filter | pending |
 
 ## Out of scope — deliberate: authentication/authorization
@@ -43,6 +43,7 @@ Give the WebUI its own backend: an admin data-access layer over the same Mongo c
 - **Admin repository vs. library provider — two bounded contexts, not one interface.** The library's `IConfigurationStorageProvider` is a *consumer* contract: one application's records, active only, read-only — that narrowing IS the case's isolation requirement. The WebUI needs an *admin* contract: every application, inactive included, read-write. Extending the provider would force admin capabilities onto every consuming service and dilute the isolation guarantee; instead the WebUI owns `IConfigurationAdminRepository`, and the two contexts meet only at the shared collection. Not raised to an ADR: it composes with ADR 0003 rather than revising it.
 - **Single source of truth for type/value parsing.** The service validates `Value` against `Type` with the very code that parses on the read path (`ConfigurationValueTypes` + the extracted `ConfigurationValueParser`). Duplicating the tolerant parse rules in the WebUI would let "valid to write" drift from "parseable to read" — the exact bug class this phase exists to prevent.
 - **Shared storage constants and BSON map instead of grep-verified duplicates.** `MongoConfigurationStorageDefaults` and `MongoConfigurationClassMap` went `internal` → `public` so the admin repository references them directly: a collection-name or Id-serialization mismatch (which would silently break the end-to-end story) is now impossible at compile time. The case-frozen public surface (`ConfigurationReader` ctor + `GetValue<T>`) and `IConfigurationStorageProvider` are untouched.
+  - **The trade-off, stated plainly:** making `ConfigurationValueParser`, `MongoConfigurationStorageDefaults` and `MongoConfigurationClassMap` public *widens the library's public surface* beyond what the case strictly requires, and every public type is a compatibility promise — renaming these, changing the parse tolerances, or restructuring the class map is now a breaking change for any consumer that referenced them, not a free internal refactor. That lost freedom is the price paid for compile-time consistency between the two bounded contexts. For this project's scope — one library, one WebUI, one repository, one team — the consistency guarantee is worth strictly more than the flexibility; in a widely-distributed NuGet package the same call would deserve more hesitation (an `InternalsVisibleTo` or a shared-internals package would compete). Known, accepted, revisitable.
 - **`LastModifiedDate` is owned by the service write path.** The library's duplicate resolution and change detection order records by `LastModifiedDate`; a stale timestamp on update would make consumers keep serving the old value. Stamping happens in `ConfigurationAdminService` on both create and update, in UTC, and is pinned by test.
 - **Write-side prevention + read-side defense.** The service validation prevents the UI from ever writing a record whose `Value` can't be read as its `Type`; the library's `ConfigurationValueFormatException` remains the safety net for records that bypass the UI (manual Mongo edits, external tools). Complementary layers, not redundancy.
 - **Repository returns `bool` on update; the service decides it means not-found.** Storage reports facts (`MatchedCount > 0` — matched, not modified: a no-change save is still a successful update); business meaning stays in the service layer.
@@ -69,9 +70,44 @@ Give the WebUI its own backend: an admin data-access layer over the same Mongo c
 
 ---
 
-# Phase 4.2 — REST API *(pending)*
+# Phase 4.2 — REST API
 
-Controllers/endpoints over `IConfigurationAdminService`, DTOs, HTTP error mapping (`ConfigurationValidationException` → 400, `ConfigurationRecordNotFoundException` → 404).
+**Status:** done · **Completed:** 2026-07-03 · **Commit:** `feat(phase-4.2): rest api with problemdetails error mapping and swagger` (single phase commit)
+
+## Goal
+
+The thin HTTP shell around the 4.1 service: four endpoints, DTOs that keep the entity off the wire, one central exception-to-HTTP mapping, and a browsable Swagger surface. Zero business logic — if a controller ever needs a business check, that is a 4.1 gap to fix in the service, never in the controller.
+
+## What was built
+
+- **`ConfigurationsController`** (`Controllers/`) — `GET /api/configurations` (all applications, inactive included — the admin view), `GET /api/configurations/{id}`, `POST /api/configurations` (201 + Location via `CreatedAtAction`), `PUT /api/configurations/{id}` (strict update; unknown id → 404, upsert deliberately rejected as decided in 4.1). Every action is 2–3 lines: bind → service call → wrap. No try/catch anywhere in the controller.
+- **Contracts** (`Contracts/`) — `ConfigurationWriteRequest` (abstract shared shape: `Name`/`Type`/`Value`/`ApplicationName` with `[Required]`+`[NotBlank]`, `IsActive` as **nullable** bool), `CreateConfigurationRequest`/`UpdateConfigurationRequest` (mapping to a fresh record; update takes its id exclusively from the route), `ConfigurationResponse` (full read shape incl. server-owned `Id` and `LastModifiedDate`), and a small `NotBlankAttribute` (whitespace-only guard complementing `[Required]`).
+- **`GlobalExceptionHandler`** (`ErrorHandling/`, .NET 8 `IExceptionHandler` — the NestJS exception-filter counterpart) — the single place exceptions become HTTP: `ConfigurationValidationException` → 400 with a `fieldName` extension, `ConfigurationRecordNotFoundException` → 404 with a `recordId` extension, everything else → 500 with a generic title and **no** message/type/stack. RFC 7807 ProblemDetails throughout; unexpected failures are error-logged with full detail (logs are trusted, response bodies are not).
+- **Swagger via Swashbuckle** — all endpoints and DTO schemas documented; `GenerateDocumentationFile` + `IncludeXmlComments` wire the XML summaries into the UI; served at `/swagger` with `/` redirecting there.
+- **Program.cs** — controllers, `AddProblemDetails` + `AddExceptionHandler`, Swagger, and the 4.1 DI registrations unchanged (connection string from `ConnectionStrings:Mongo`, database-name fallback through the library's public `MongoConfigurationStorageDefaults`).
+- **Tests** — 23 new (161 total, all green): controller tests against a hand-rolled fake service, handler mapping tests, and contract shape tests.
+
+## Key decisions
+
+- **Thin-controller discipline as a hard rule.** Actions bind, call, wrap — nothing else. Error translation is middleware, business rules are the service. This is what makes the 4.1/4.2 split honest: the HTTP layer is replaceable (minimal APIs, gRPC, a console admin tool) without touching a single rule.
+- **Two validation layers, zero overlap.** DataAnnotations reject *shape* garbage at the door (missing/blank required fields → automatic 400 with field detail, before model code runs); the service owns every *semantic* rule (supported Type, Value parseable as Type). The deep rules are deliberately **not** duplicated as attributes — one source of truth per rule, and a non-HTTP caller of the service still hits the full rule set.
+- **Server-owned fields enforced by type, not documentation.** Request DTOs simply have no `Id` or `LastModifiedDate` properties — a client cannot send what cannot bind. The update id comes exclusively from the route. Pinned by a reflection test.
+- **`IsActive` tri-state completed at the HTTP end.** The DTO's nullable bool is the wire end of 4.1's `bool? isActive` channel: omitted JSON property → `null` → service defaults to active. The controller forwards it untouched — the default lives in exactly one place (the service).
+- **RFC 7807 ProblemDetails everywhere, extensions for machine-readable context.** `fieldName` (400) and `recordId` (404) ride as ProblemDetails extensions — this is what 4.1's exception `FieldName` property was built for; 4.3's form will attach errors to inputs with it. 500s leak nothing: generic title only.
+- **Swagger enabled in every environment.** An internal admin tool the reviewer must be able to exercise from a container (which runs as Production by default); gating it on Development would hide the API exactly when it is being evaluated.
+
+## Test coverage
+
+`dotnet test` → 161/161 green (96 library + 65 WebUI), zero database dependency. Also smoke-tested over real HTTP: Swagger UI/JSON 200, malformed id → 400 ProblemDetails with `fieldName` through the actual middleware pipeline, missing `Name` → automatic 400 with field detail. New behavior proven:
+
+- **Controller shell:** each action calls the right service method with the right arguments (route id → `GetByIdAsync`/record.Id, DTO fields → record); `GET` all returns inactive records (admin view); `POST` returns `CreatedAtAction` pointing at `GetById` with the server-generated id; omitted `IsActive` reaches the service as `null`, explicit `false` as `false`.
+- **No-catch proof:** a service that throws not-found propagates uncaught out of `GetById`/`Update` — a swallowed exception would turn 404s into 200s.
+- **Handler mapping:** 400 carries `Detail` + `fieldName`; 404 carries `Detail` + `recordId`; 500 contains neither the internal message nor the exception type anywhere in the serialized body; `TryHandleAsync` writes the matching status code and returns handled.
+- **Contract shape:** valid request passes; blank `Name`/`ApplicationName`/`Type` fail with the exact member name; unknown-but-present type name *passes* the shape layer (the service's job — the zero-overlap rule, pinned); omitted `isActive` deserializes as `null`, explicit `false` as `false`; request types structurally lack `Id`/`LastModifiedDate`.
+
+## Deviations from plan
+
+None — no frontend code, no broker code, no business checks surfaced while writing the controller (the 4.1 service covered every path the shell needed).
 
 # Phase 4.3 — Frontend *(pending)*
 
