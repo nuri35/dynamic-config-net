@@ -14,7 +14,9 @@ DynamicConfig is a .NET 8 dynamic configuration system built for a backend devel
 | 2 | Atomic immutable-snapshot swap for concurrency | Lock-free `GetValue<T>` hot path; readers never see torn state | [ADR 0002](docs/adr/0002-atomic-snapshot-swap.md) |
 | 3 | Storage behind `IConfigurationStorageProvider` | Reader unit-testable with mocks; storage swappable without touching core | [ADR 0003](docs/adr/0003-storage-behind-interface.md) |
 | 4 | Fail-fast on initial load | "Last successful records" presupposes one success; config-less service misbehaves anyway; boot-throw composes with orchestrator restarts | [ADR 0004](docs/adr/0004-fail-fast-initial-load.md) |
-| 5 | Polling + RabbitMQ hybrid refresh — **EXTRA, Phase 5 only** | Broker = millisecond latency; polling = guaranteed convergence and broker-down fallback. No broker code before Phase 5. | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) (proposed) |
+| 5 | Polling + RabbitMQ hybrid refresh — broker is an ACCELERATOR, never a dependency | Broker = sub-second latency; polling = guaranteed convergence ≤1 interval; publish failure never fails a write; consumer without broker degrades to polling-only | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) (accepted) |
+| 6 | Broker topology: one fanout exchange + per-instance exclusive auto-delete queues | Config changes are rare — consumer-side filtering costs nothing; fanout is single-pattern, bind-and-forget; topic-with-routing-key is the documented at-scale alternative | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) |
+| 7 | Thin event — `{ applicationName, occurredAtUtc }`, never values ("notify, don't transfer") | Mongo stays single source of truth; idempotent under at-least-once redelivery; no sensitive values in flight; consumer match → existing `RefreshSnapshotAsync`, mismatch → silent drop | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) |
 
 Rules: changing a locked decision requires the user's explicit approval. Any decision made or revised mid-phase updates this table **and** its ADR in the same commit.
 
@@ -38,7 +40,7 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 
 | Phase | Scope | Status | Completed | Outcome | Doc |
 |---|---|---|---|---|---|
-| 5 | RabbitMQ instant refresh (publisher + consumer, graceful degradation, ADR 0005) | pending | — | — | — |
+| 5 | RabbitMQ instant refresh (publisher + consumer, graceful degradation, ADR 0005) | in progress | — | Docs-first kickoff landed 2026-07-03: ADR 0005 accepted (hybrid/fanout/thin-event/failure policies), architecture + README promoted, broker-address-vs-frozen-ctor question PENDING (resolved with user at implementation start) | [phase-5](docs/phases/phase-5.md) |
 | 6 | Full docker-compose ecosystem (mongo + rabbitmq + webui + demoservice) | pending | — | — | — |
 | 7 | Documentation polish (README final pass, diagrams, coverage checklist) | pending | — | — | — |
 

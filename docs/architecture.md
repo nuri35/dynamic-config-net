@@ -89,21 +89,36 @@ HTTP client → `ConfigurationsController` (DataAnnotations reject shape garbage
 | Concurrent read during refresh | Reader sees entire old or entire new snapshot, never a mix | Atomic swap ([ADR 0002](adr/0002-atomic-snapshot-swap.md)) |
 | Service reads another service's key | Impossible — records are filtered by `ApplicationName` in the Mongo query; foreign records never enter memory | Query-level isolation ([ADR 0001](adr/0001-mongodb-as-storage.md)) |
 
-## EXTRA (planned — Phase 5, only after the Phase 4 checkpoint)
+## Instant-Refresh Flow (broker, Phase 5 — [ADR 0005](adr/0005-polling-plus-broker-hybrid.md), accepted)
 
-Broker-triggered instant refresh, designed in [ADR 0005](adr/0005-polling-plus-broker-hybrid.md) (status: proposed). WebUI publishes a `config-changed` event to a RabbitMQ **fanout exchange** on every create/update; each library instance consumes it and triggers an immediate refresh through the same storage-query code path the poller uses. The event carries no data — signal, not state — so lost/duplicate messages are harmless and polling remains the guaranteed convergence path. Until Phase 5 lands, change propagation latency is bounded by one poll interval.
+The speed layer on top of polling: the WebUI publishes a thin `config-changed` event (`{ applicationName, occurredAtUtc }` — a signal, never values) to a single RabbitMQ **fanout exchange** after every successful write. Each reader instance binds its own **exclusive auto-delete queue** (dies with the instance); on a message it drops foreign application names silently and otherwise early-triggers the **existing** `RefreshSnapshotAsync` path — the broker adds no new data path, and MongoDB stays the single source of truth. Polling remains the guaranteed-convergence base layer (≤1 interval), which makes the broker an accelerator, never a dependency.
 
 ```mermaid
 sequenceDiagram
     participant U as WebUI
     participant M as MongoDB
     participant X as RabbitMQ (fanout)
+    participant Q as Per-instance queue (exclusive, auto-delete)
     participant L as Library consumer
 
     U->>M: insert / update record
-    U->>X: publish config-changed
-    X-->>L: config-changed
-    L->>L: trigger immediate refresh (same code path as poller)
+    M-->>U: success (HTTP response reflects Mongo only)
+    U-->>X: publish config-changed { applicationName, occurredAtUtc }
+    X-->>Q: broadcast
+    Q-->>L: config-changed
+    alt event.applicationName == own
+        L->>L: RefreshSnapshotAsync (same query + atomic swap as the poller)
+    else foreign application
+        L->>L: drop silently (no refresh, no Mongo read)
+    end
 ```
 
-Additional failure modes this introduces (all degrade to CORE behavior): RabbitMQ down → polling still converges within one interval; lost/duplicate message → refresh is idempotent and polling backstops.
+Failure paths (both degrade to CORE behavior, by policy):
+- **Publish fails** → the write still succeeds; log-and-continue, polling carries the change within one interval.
+- **Broker down / unreachable from a consumer** → that reader runs polling-only, exactly the CORE contract.
+
+Pending detail (deliberately unresolved until implementation start): where the consumer's broker address comes from — the case-frozen 3-param ctor has no slot for it. Options catalogued in ADR 0005.
+
+## EXTRA (remaining — Phases 6–7)
+
+Full docker-compose ecosystem (mongo + rabbitmq + webui + demoservice) and final documentation polish.
