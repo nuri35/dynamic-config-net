@@ -109,6 +109,8 @@ double rate       = reader.GetValue<double>("ConversionRate");
 
 Prerequisites: Docker (for storage) + .NET 8 SDK.
 
+> **The compose Mongo is the only supported setup:** if a native `mongod` is installed, stop it before starting — two listeners on 27017 silently shadow each other, and a stop of one fails over to the other's (empty) database instead of producing a real outage (finding documented in [phase-4.md](docs/phases/phase-4.md)).
+
 ```bash
 # 1. Start storage
 docker-compose up -d

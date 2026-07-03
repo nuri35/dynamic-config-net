@@ -78,3 +78,4 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 - .NET SDK 8.0.422 installed at `C:\Program Files\dotnet` but **not on PATH in fresh shells** — prefix commands with `$env:PATH = "C:\Program Files\dotnet;$env:PATH"`.
 - NuGet had zero configured sources on this machine; `nuget.org` was added manually (`dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org`).
 - Case source PDF (Turkish): `C:\Users\Nurie\Downloads\Backend Developer Code Case.pdf`.
+- **Mongo: docker-only on this machine (2026-07-03).** The native Windows `MongoDB` service is stopped and set to `Disabled` after the e2e shadow-Mongo finding (two listeners on 27017 fail over silently). Use `docker compose up -d`; the container DB carries the seeded demo dataset (SERVICE-A/B records).
