@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DynamicConfig Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>DynamicConfig <span class="accent">Admin</span></h1>
+    <a class="doc-link" href="/swagger">API docs</a>
+  </header>
+
+  <main>
+    <section class="toolbar">
+      <!-- Narrows the already-loaded list in memory; never triggers a request. -->
+      <input id="name-filter" type="search" placeholder="Filter by name…" autocomplete="off" />
+      <button id="add-button" type="button" class="primary">+ Add</button>
+    </section>
+
+    <p id="global-message" class="global-message" hidden></p>
+
+    <section id="form-panel" class="form-panel" hidden>
+      <h2 id="form-title">Add configuration</h2>
+      <!-- The record id deliberately has no input: it lives in data-record-id and
+           travels only via the PUT route. Server-owned discipline, UI edition. -->
+      <form id="record-form" novalidate>
+        <div class="field">
+          <label for="field-name">Name</label>
+          <input id="field-name" name="name" data-field="Name" />
+          <p class="field-error" data-error-for="Name" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="field-type">Type</label>
+          <!-- Dropdown, not free text: a typo'd type is impossible by design. -->
+          <select id="field-type" name="type" data-field="Type">
+            <option value="string">string</option>
+            <option value="int">int</option>
+            <option value="double">double</option>
+            <option value="bool">bool</option>
+          </select>
+          <p class="field-error" data-error-for="Type" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="field-value">Value</label>
+          <input id="field-value" name="value" data-field="Value" />
+          <p class="field-error" data-error-for="Value" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="field-application-name">Application name</label>
+          <input id="field-application-name" name="applicationName" data-field="ApplicationName" />
+          <p class="field-error" data-error-for="ApplicationName" hidden></p>
+        </div>
+
+        <div class="field field-checkbox">
+          <label for="field-is-active">
+            <input id="field-is-active" name="isActive" type="checkbox" checked />
+            Active
+          </label>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="cancel-button">Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <table id="records-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Value</th>
+          <th>Status</th>
+          <th>Application</th>
+          <th>Last modified (UTC)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="records-body"></tbody>
+    </table>
+    <p id="empty-message" class="empty-message" hidden>No configuration records match.</p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

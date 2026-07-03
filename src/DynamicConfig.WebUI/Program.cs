@@ -61,7 +61,11 @@ app.UseExceptionHandler();
 app.UseSwagger();
 app.UseSwaggerUI();
 
+// The admin frontend (4.3): plain static files from wwwroot — no framework, no
+// build pipeline. UseDefaultFiles rewrites "/" to index.html.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.MapControllers();
-app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();

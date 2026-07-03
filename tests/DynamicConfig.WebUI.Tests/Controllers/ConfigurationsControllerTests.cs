@@ -146,9 +146,29 @@ public class ConfigurationsControllerTests
 
         // The body cannot carry an id; the route is the only channel.
         Assert.Equal(ExistingId, _service.LastUpdatedRecord!.Id);
+        // Tri-state forwarded untouched on update too (smoke-caught gap: this was
+        // silently lost and every UI edit deactivated the record).
+        Assert.Null(_service.LastUpdateIsActive);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var response = Assert.IsType<ConfigurationResponse>(ok.Value);
         Assert.Equal("soty.com", response.Value);
+    }
+
+    [Fact]
+    public async Task Update_ExplicitIsActiveFalse_FlowsThroughAsFalse()
+    {
+        var request = new UpdateConfigurationRequest
+        {
+            Name = "SiteName",
+            Type = "string",
+            Value = "soty.com",
+            ApplicationName = "SERVICE-A",
+            IsActive = false,
+        };
+
+        await _controller.Update(ExistingId, request, CancellationToken.None);
+
+        Assert.False(_service.LastUpdateIsActive);
     }
 
     [Fact]

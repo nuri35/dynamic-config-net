@@ -226,6 +226,44 @@ public class ConfigurationAdminServiceTests
         Assert.InRange(stamped, beforeUpdate, afterUpdate);
     }
 
+    // --- Update: IsActive tri-state (same channel as create — a smoke-caught gap:
+    // without it, every update silently persisted default(bool) = inactive) --------
+
+    [Fact]
+    public async Task UpdateAsync_IsActiveNotProvided_DefaultsToTrue()
+    {
+        _repository.Seed(BuildValidRecord(id: ExistingId));
+        var updated = BuildValidRecord(id: ExistingId);
+        updated.IsActive = false; // the record's own field is ignored; the parameter is the channel
+
+        await _service.UpdateAsync(updated);
+
+        Assert.True(_repository.LastUpdatedRecord!.IsActive);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_IsActiveExplicitlyFalse_StoresInactiveRecord()
+    {
+        _repository.Seed(BuildValidRecord(id: ExistingId));
+        var updated = BuildValidRecord(id: ExistingId);
+
+        await _service.UpdateAsync(updated, isActive: false);
+
+        Assert.False(_repository.LastUpdatedRecord!.IsActive);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_IsActiveExplicitlyTrue_StoresActiveRecord()
+    {
+        _repository.Seed(BuildValidRecord(id: ExistingId));
+        var updated = BuildValidRecord(id: ExistingId);
+        updated.IsActive = false;
+
+        await _service.UpdateAsync(updated, isActive: true);
+
+        Assert.True(_repository.LastUpdatedRecord!.IsActive);
+    }
+
     [Fact]
     public async Task UpdateAsync_UnknownId_ThrowsRecordNotFound()
     {

@@ -6,7 +6,7 @@ Phase 4 is delivered in three sub-phases, each with its own commit and quality g
 |---|---|---|
 | 4.1 | WebUI backend: admin repository & service layer | done |
 | 4.2 | REST API: controllers/endpoints, DTOs, HTTP error mapping | done |
-| 4.3 | Frontend: list/add/update UI, client-side name filter | pending |
+| 4.3 | Frontend: list/add/update UI, client-side name filter | done |
 
 ## Out of scope — deliberate: authentication/authorization
 
@@ -109,6 +109,48 @@ The thin HTTP shell around the 4.1 service: four endpoints, DTOs that keep the e
 
 None — no frontend code, no broker code, no business checks surfaced while writing the controller (the 4.1 service covered every path the shell needed).
 
-# Phase 4.3 — Frontend *(pending)*
+# Phase 4.3 — Frontend
 
-List/add/update UI with client-side name filtering.
+**Status:** done · **Completed:** 2026-07-03 · **Commit:** `feat(phase-4.3): vanilla js admin frontend with client-side name filter` (single phase commit)
+
+## Goal
+
+The last CORE step: a single-page admin UI served as static files from the WebUI project — list all records, client-side name filter, create and edit forms wired to the 4.2 API, field-level error display. Closing this reaches the ✅ CHECKPOINT: every mandatory case requirement is met.
+
+## What was built
+
+- **`wwwroot/index.html` + `app.js` + `style.css`** — no framework, no build pipeline, no npm. Served via `UseDefaultFiles`/`UseStaticFiles`; `/` now serves the UI (Swagger stays at `/swagger`, linked from the header).
+- **Table view** — on load, one `GET /api/configurations`; renders every record (all applications, inactive included). Inactive rows are muted and badged. Columns: Name, Type, Value, Status, Application, Last modified (UTC), Edit.
+- **Client-side name filter** — the compliance-sensitive item: the input's handler is `renderTable` only, which projects the already-loaded `allRecords` array (case-insensitive contains on Name). **No fetch exists anywhere on the filter path** — verified by the compliance scan.
+- **Create** — "+ Add" opens an empty form; Type is a **dropdown** of the four supported types; IsActive is a checkbox defaulting to checked (unchecked posts `false` — the DTO's nullable channel stays intact). 201 → close, re-fetch, re-render.
+- **Edit** — per-row button pre-fills the form from the in-memory record (stored type spellings like `Int`/`boolean` normalize onto the dropdown). The id is never a form field: it rides in `data-record-id` and travels only via the PUT route — server-owned discipline extended to the UI. 200 → close, re-fetch, re-render.
+- **Error handling — the 4.1→4.2→4.3 payoff:** a 400's `fieldName` (service ProblemDetails) or `errors` map (automatic DataAnnotations 400) renders the message directly under the matching input; 404 on edit closes the form, shows an honest "record no longer exists" message and refreshes the list (consistent with the strict-update/no-upsert stance); network failures and 500s show one generic, non-technical message.
+
+## Key decisions
+
+- **Vanilla JS, stated plainly:** the case does not score visuals; a SPA framework would add a build pipeline, node_modules and docker complexity while covering zero additional requirements. Discipline is kept without the framework: one in-memory state (`allRecords`), small single-purpose functions (`fetchAllRecords` / `renderTable` / `openCreateForm` / `openEditForm` / `submitForm` / `showFieldError`), strict one-way flow (API → state → render). The DOM is a render target only — the edit form reads its record from state via closure, never back out of the DOM.
+- **Type dropdown over free text** — a typo'd type is impossible by design; the service's `UnsupportedType` rejection remains as defense for non-UI clients.
+- **XSS-safe rendering** — rows are built with `createElement`/`textContent`, never concatenated into `innerHTML`: record values are user data and must not be interpretable as markup.
+- **No JS test framework — deliberate scope decision.** Every behavior guarantee (validation, tri-state, error shapes, status codes) already lives in the 165 API-side tests; the frontend is a thin projection of that API. A JS test harness (Jest/Vitest + DOM emulation) would re-test the same contracts at higher tooling cost. Verification instead: a real-HTTP smoke pass (documented below) plus code inspection for the zero-fetch filter guarantee.
+
+## Write-side concurrency model (documented, deliberately not implemented)
+
+Three known windows, all accepted for this project's scale — an internal admin tool distributing configuration:
+
+1. **Concurrent admin edits — last-write-wins by design.** Two admins editing the same record race; the later `ReplaceOne` wins silently. The known alternative is optimistic concurrency (a version/ETag column, `409 Conflict` + reload flow) — deliberately out of scope here; it would be the right call in a finance-grade or multi-team context.
+2. **Related-records window.** A poll can land between two related updates (e.g. a provider name and its API key saved seconds apart), so a consumer may run for one interval with a mixed pair; the next poll self-heals. The known remedies — config-set versioning or a batch-update endpoint applying both atomically — are out of scope because the case treats every record as independent.
+3. **Cross-instance propagation window.** N service instances poll on unaligned timers, so after a write, instances converge within ≤1 poll interval each (eventual consistency — the standard model for config/feature-flag distribution). The Phase 5 broker, if approved, shrinks this to sub-second; polling remains the guaranteed-convergence fallback either way.
+
+## Test coverage / smoke results
+
+Frontend behavior is specified by the API tests (see the no-JS-test-framework decision); the suite ends the phase at 165/165 green. Real-HTTP smoke pass against the running app with MongoDB up:
+
+- Page loads at `/`; static assets serve 200.
+- Create round-trip: POST → 201 → record appears in the re-rendered table.
+- Edit round-trip: PUT with the row's id → 200 → updated value renders.
+- Field-level error: submitting `Type=int, Value=abc` → 400 → message rendered under the Value input (`fieldName` extension consumed).
+- Filter: typing narrows the table with zero network requests (code inspection: the input handler is `renderTable`, which contains no `fetch`; `fetch` appears only in `fetchAllRecords` and `submitForm`).
+
+## Deviations from plan
+
+One addition beyond the planned scope: the smoke-caught update-path `IsActive` fix described above touched 4.1's service (`UpdateAsync` signature) and 4.2's controller (one argument). No broker code, no framework, no JS test tooling; the `/` → `/swagger` redirect from 4.2 was replaced by the UI as planned (Swagger remains reachable and linked).

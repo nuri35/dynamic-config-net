@@ -18,6 +18,7 @@ internal sealed class FakeConfigurationAdminService : IConfigurationAdminService
     public ConfigurationRecord? LastCreatedRecord { get; private set; }
     public bool? LastCreateIsActive { get; private set; }
     public ConfigurationRecord? LastUpdatedRecord { get; private set; }
+    public bool? LastUpdateIsActive { get; private set; }
     public string? LastRequestedId { get; private set; }
     public Exception? ExceptionToThrow { get; set; }
 
@@ -55,11 +56,14 @@ internal sealed class FakeConfigurationAdminService : IConfigurationAdminService
 
     public Task<ConfigurationRecord> UpdateAsync(
         ConfigurationRecord record,
+        bool? isActive = null,
         CancellationToken cancellationToken = default)
     {
         LastUpdatedRecord = record;
+        LastUpdateIsActive = isActive;
         ThrowIfConfigured();
 
+        record.IsActive = isActive ?? true;
         record.LastModifiedDate = StampedDate;
         return Task.FromResult(record);
     }

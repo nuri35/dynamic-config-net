@@ -27,7 +27,13 @@ public interface IConfigurationAdminService
     Task<ConfigurationRecord> CreateAsync(ConfigurationRecord record, bool? isActive = null, CancellationToken cancellationToken = default);
 
     /// <summary>Validates and replaces an existing record, refreshing <c>LastModifiedDate</c> (UTC).</summary>
+    /// <param name="record">The replacement state. Its <c>IsActive</c> field is ignored —
+    /// <paramref name="isActive"/> is the only channel, exactly as on create.</param>
+    /// <param name="isActive">The client's tri-state activity choice: <c>null</c> means
+    /// "not provided" and defaults to <c>true</c> — the same rule as create, so both
+    /// write verbs share one documented default.</param>
+    /// <param name="cancellationToken">Cancels the storage write.</param>
     /// <exception cref="Exceptions.ConfigurationValidationException">A business rule failed.</exception>
     /// <exception cref="Exceptions.ConfigurationRecordNotFoundException">No record has that id.</exception>
-    Task<ConfigurationRecord> UpdateAsync(ConfigurationRecord record, CancellationToken cancellationToken = default);
+    Task<ConfigurationRecord> UpdateAsync(ConfigurationRecord record, bool? isActive = null, CancellationToken cancellationToken = default);
 }

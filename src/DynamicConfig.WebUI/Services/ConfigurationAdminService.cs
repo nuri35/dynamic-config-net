@@ -54,12 +54,15 @@ public sealed class ConfigurationAdminService : IConfigurationAdminService
         return await _repository.CreateAsync(record, cancellationToken);
     }
 
-    public async Task<ConfigurationRecord> UpdateAsync(ConfigurationRecord record, CancellationToken cancellationToken = default)
+    public async Task<ConfigurationRecord> UpdateAsync(ConfigurationRecord record, bool? isActive = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
         EnsureWellFormedId(record.Id);
         ValidateBusinessRules(record);
 
+        // Same tri-state channel and default as create — one rule, both write verbs.
+        // (Smoke-caught: without this, updates persisted default(bool) = inactive.)
+        record.IsActive = isActive ?? true;
         record.LastModifiedDate = DateTime.UtcNow;
         var recordWasFound = await _repository.UpdateAsync(record, cancellationToken);
         if (!recordWasFound)

@@ -65,7 +65,7 @@ public sealed class ConfigurationsController : ControllerBase
         UpdateConfigurationRequest request,
         CancellationToken cancellationToken)
     {
-        var updated = await _configurationAdminService.UpdateAsync(request.ToRecord(id), cancellationToken);
+        var updated = await _configurationAdminService.UpdateAsync(request.ToRecord(id), request.IsActive, cancellationToken);
         return Ok(ConfigurationResponse.FromRecord(updated));
     }
 }

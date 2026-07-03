@@ -43,6 +43,7 @@ flowchart LR
 | `ConfigurationsController` | `DynamicConfig.WebUI` | Thin REST shell (`/api/configurations`): bind DTO → service call → wrap. No try/catch, no business checks. Swagger-documented at `/swagger`. |
 | `GlobalExceptionHandler` | `DynamicConfig.WebUI` | The one exception→HTTP mapping (.NET 8 `IExceptionHandler`): validation → 400 + `fieldName`, not-found → 404 + `recordId`, unexpected → 500 leaking nothing. RFC 7807 ProblemDetails throughout. |
 | Contracts (DTOs) | `DynamicConfig.WebUI` | The entity never crosses HTTP. Write requests: required fields via DataAnnotations, `IsActive` nullable (tri-state), no `Id`/`LastModifiedDate` properties (server-owned by type). Response carries the full read shape. |
+| Frontend | `DynamicConfig.WebUI/wwwroot` | Vanilla JS single page served as static files (no framework/build pipeline — deliberate). One-way flow API → in-memory state → render; the name filter narrows the loaded array with zero network requests; 400s render field-level via the `fieldName` extension. |
 | DemoService | `DynamicConfig.DemoService` | Proof-of-consumption: boots with the library and exposes its live config values. |
 
 ## Data Flows (CORE)
