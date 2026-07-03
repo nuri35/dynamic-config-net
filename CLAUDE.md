@@ -17,6 +17,7 @@ DynamicConfig is a .NET 8 dynamic configuration system built for a backend devel
 | 5 | Polling + RabbitMQ hybrid refresh — broker is an ACCELERATOR, never a dependency | Broker = sub-second latency; polling = guaranteed convergence ≤1 interval; publish failure never fails a write; consumer without broker degrades to polling-only | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) (accepted) |
 | 6 | Broker topology: one fanout exchange + per-instance exclusive auto-delete queues | Config changes are rare — consumer-side filtering costs nothing; fanout is single-pattern, bind-and-forget; topic-with-routing-key is the documented at-scale alternative | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) |
 | 7 | Thin event — `{ applicationName, occurredAtUtc }`, never values ("notify, don't transfer") | Mongo stays single source of truth; idempotent under at-least-once redelivery; no sensitive values in flight; consumer match → existing `RefreshSnapshotAsync`, mismatch → silent drop | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) |
+| 8 | Consumer opt-in via `DYNAMIC_CONFIG_RABBITMQ_URI` env var — absence is a mode, not an error | Case-frozen ctor stays character-identical; set → hybrid, absent/blank → polling-only (Phase 4 byte-identical); broker down at boot → log + polling-only (fail-fast is Mongo-only, ADR 0004 asymmetry); startup trace line states the mode | [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md) |
 
 Rules: changing a locked decision requires the user's explicit approval. Any decision made or revised mid-phase updates this table **and** its ADR in the same commit.
 
@@ -41,7 +42,7 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 | Phase | Scope | Status | Completed | Outcome | Doc |
 |---|---|---|---|---|---|
 | 5.1 | RabbitMQ publisher (WebUI side: seam + fanout publish, fire-and-forget) | done | 2026-07-03 | `IConfigurationChangePublisher` seam + lazy self-healing RabbitMQ impl; publish AFTER Mongo success, failure = log-and-continue (201 stays 201, proven live with broker stopped); thin event pinned by test; rabbitmq:3-management in compose; 172/172 tests. Exchange-constant placement flagged for 5.2 | [phase-5](docs/phases/phase-5.md) |
-| 5.2 | RabbitMQ consumer (library side: exclusive queue, match → refresh, polling-only degradation) | pending | — | Gated on two user decisions: broker-address channel vs frozen ctor; exchange-constant placement | [phase-5](docs/phases/phase-5.md) |
+| 5.2 | RabbitMQ consumer (library side: exclusive queue, match → refresh, polling-only degradation) | done | 2026-07-03 | Env-var opt-in (`DYNAMIC_CONFIG_RABBITMQ_URI`, decision 8); shared kernel moved to library (`RabbitMqBrokerDefaults` + `ConfigurationChangedEvent` = the wire contract, WebUI publisher now serializes the same type); internal `IConfigurationChangeSource` seam + RabbitMQ impl (exclusive auto-delete queue, autoAck/no-nack, parse-or-drop); frozen ctor character-identical; no refresh gate (verified + pinned); 187/187 tests; live smoke 1 037 ms vs 60 000 ms poll floor | [phase-5](docs/phases/phase-5.md) |
 | 6 | Full docker-compose ecosystem (mongo + rabbitmq + webui + demoservice) | pending | — | — | — |
 | 7 | Documentation polish (README final pass, diagrams, coverage checklist) | pending | — | — | — |
 

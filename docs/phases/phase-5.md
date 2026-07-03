@@ -55,6 +55,48 @@ None — no consumer, no library changes, no full-compose orchestration beyond t
 
 ---
 
-# Phase 5.2 — Broker Consumer (library side) *(pending)*
+# Phase 5.2 — Broker Consumer (library side)
 
-Gate: resolve the two reserved questions with the user first — (1) the broker-address channel vs the case-frozen 3-param ctor (options in ADR 0005), (2) exchange-constant placement (library shared-kernel vs duplicate-and-verify). Then: consumer binding an exclusive auto-delete queue, silent drop on foreign application names, match → existing `RefreshSnapshotAsync`, graceful polling-only degradation without the broker.
+**Status:** done · **Completed:** 2026-07-03 · **Commit:** `feat(phase-5.2): env-var opt-in broker consumer with polling-only degradation`
+
+Both reserved questions were resolved by the user at kickoff: (1) broker address via the `DYNAMIC_CONFIG_RABBITMQ_URI` environment variable; (2) exchange constant moves into the library as shared kernel.
+
+## The E decision — `DYNAMIC_CONFIG_RABBITMQ_URI`
+
+**Semantics:** present and non-blank → the reader starts the instant-refresh consumer next to polling (hybrid mode); absent or blank → no consumer object is ever constructed — pure polling, exactly Phase 4 behavior, zero broker code on any path. Absence is a *mode*, not an error.
+
+**Rationale:** the case-frozen 3-param constructor stays **character-identical** (verified by compliance scan); opt-in costs consumers nothing (no signature change, no recompile of existing callers); environment-variable configuration is the 12-factor idiom and composes naturally with docker-compose (Phase 6); graceful-by-absence means the bonus feature literally cannot regress the required one.
+
+**Known weakness + antidotes:** an environment variable is an *invisible contract* — nothing in the API surface hints it exists. Antidotes shipped with it: (a) a dedicated README section under Usage (name, format, example, with/without behavior), (b) the constant `RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName` is public with full XML docs, (c) one startup `Trace` line always states the mode ("broker URI found — instant-refresh consumer started" / "no broker URI — polling-only mode"), so the reader's mode is observable by any host that attaches a trace listener.
+
+## What was built
+
+- **Shared kernel moved into the library** (`Messaging/`): `RabbitMqBrokerDefaults` (exchange name + env-var name) and `ConfigurationChangedEvent` (the record IS the wire contract: `ToUtf8Json()` for the publisher, `TryParse()` for the consumer — the WebUI's local copies were deleted and its publisher now serializes the library type, so publisher/consumer drift is impossible at compile time). Same public-surface trade-off as 4.1's constants move: wider library surface bought for cross-context consistency — known, accepted, flagged here.
+- **`IConfigurationChangeSource`** — the internal consumer seam (mirror of ADR 0003): `StartAsync(callback, ct)`, mockable, `IAsyncDisposable`. The broker integration stays an implementation detail behind the frozen surface.
+- **`RabbitMqConfigurationChangeSource`** — server-named **exclusive auto-delete** queue bound to the shared fanout exchange (dies with the instance, no orphans); `AutomaticRecoveryEnabled` for mid-life drops (while down, polling carries — no custom retry machinery, consistent with 5.1's no-outbox); **autoAck with no nack/requeue choreography** — a failed refresh after a message is not broker-retried, the next poll self-heals; malformed bodies are parse-or-drop (`TryParse` + trace warning) so one bad message never kills the consumer.
+- **`ConfigurationReader` integration** — internal ctor gains an optional `IConfigurationChangeSource?` (test seam; public ctor untouched). Consumer start is backgrounded (`_consumerStart`) and failure-swallowed; on message: foreign name → silent drop with trace, own name → the **existing** `RefreshSnapshotAsync`. `Dispose`/`DisposeAsync` extend to the consumer (await start, dispose source, double-dispose safe). Internal observability for tests: `IsInstantRefreshConfigured`, `WaitForConsumerStartAsync()`.
+- **DemoService** — `DYNAMIC_CONFIG_RABBITMQ_URI` added to `launchSettings.json` (http profile) for the 5.3 demo; no other changes.
+
+## Key decisions
+
+- **The fail-fast asymmetry (ADR 0004 vs the broker), stated for the record:** Mongo unreachable at construction → **throw** — Mongo is the *data source*; without one successful load the reader has nothing to serve and every `GetValue` would lie. Broker unreachable at construction → **log and continue polling-only** — the broker is the *accelerator*; its absence costs latency (≤1 poll interval), never correctness. Same event, opposite policy, because the two dependencies hold opposite roles. Pinned by test (`BrokerUnreachableAtStart_ReaderBootsPollingOnly`).
+- **No refresh serialization (concurrency guard verified, not assumed):** a broker-triggered and a timer-triggered refresh may run concurrently. Analysis: each `RefreshSnapshotAsync` builds a *complete* snapshot and publishes via `Volatile.Write` — last-write-wins on the reference, torn state impossible; the only theoretical edge is a slower-but-staler fetch landing after a faster-fresher one, a sub-interval regression the next poll self-heals. A refresh gate would add contention for no practical gain → none added; pinned by the 20-generation concurrent-refresh consistency test.
+- **No nack/requeue:** autoAck by design. Broker redelivery machinery would duplicate what polling already guarantees, and a poison message that repeatedly failed refresh would loop forever; drop-and-let-polling-carry is strictly simpler with identical convergence.
+- **Consumer start backgrounded via `Task.Yield`:** the ctor returns immediately (no broker I/O on the construction path, no new sync bridges); the start task never faults, and `DisposeAsync` awaits it before disposing the source — no orphaned starts.
+
+## Test coverage
+
+`dotnet test` → 187/187 green (112 library + 75 WebUI). New behavior proven against the mocked seam (no live RabbitMQ in unit tests):
+
+- Matching event → exactly one storage fetch, fresh value served; foreign event → zero fetches (silent drop).
+- Broker down at start (fake throws) → ctor survives, CORE serves; env var set to a dead port with the **real** RabbitMQ source → ctor does not throw, `GetValue` works (polling-only).
+- Env var absent → `IsInstantRefreshConfigured == false`, no consumer exists (pins Phase 4 behavior).
+- `DisposeAsync` disposes the change source; double-dispose safe.
+- Concurrency: 20 generations of simultaneous broker + manual refreshes — both keys always from one generation.
+- Wire contract (shared type): serialization emits exactly two camelCase fields; `TryParse` round-trips, rejects malformed JSON / missing / blank names without throwing, tolerates extra fields (forward compatibility).
+
+**Live smoke (timing evidence for 5.3):** DemoService with `DYNAMIC_CONFIG_RABBITMQ_URI` set and the poll interval deliberately stretched to **60 000 ms**; a WebUI edit of `MaxItemCount` was served by the reader in **1 037 ms** end-to-end (HTTP write + Mongo + publish + fanout + refresh + observer polling overhead) — 58× faster than the poll floor, provably broker-triggered.
+
+## Deviations from plan
+
+None beyond the pre-flagged shared-kernel move (exchange constant + wire contract into the library, per the user's instruction). The frozen surface is character-identical; compose untouched beyond 5.1's rabbitmq service; no e2e demo pass (that's 5.3).

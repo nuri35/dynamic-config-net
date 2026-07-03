@@ -118,6 +118,22 @@ double rate       = reader.GetValue<double>("ConversionRate");
 // Other service's record -> not visible (filtered at the storage query)
 ```
 
+### Instant refresh — opt-in via `DYNAMIC_CONFIG_RABBITMQ_URI`
+
+The constructor is frozen by the case at three parameters, so the broker consumer is opted into through **one environment variable**:
+
+```bash
+# hybrid mode: broker-triggered refresh in milliseconds + polling as the guaranteed base
+DYNAMIC_CONFIG_RABBITMQ_URI=amqp://guest:guest@localhost:5672
+```
+
+| State | Behavior |
+|---|---|
+| Variable set (non-blank) | The reader additionally binds an exclusive auto-delete queue to the `dynamicconfig.config-changed` fanout exchange; a matching event triggers the same refresh the poller runs. Broker unreachable? Logged, reader continues polling-only — never a boot failure. |
+| Variable absent / blank | No consumer is created at all — pure polling, byte-identical to the core behavior. Absence is a mode, not an error. |
+
+One startup trace line always states which mode the reader is in ("instant-refresh consumer started" / "polling-only mode").
+
 ## Running the Project
 
 Prerequisites: Docker (for storage) + .NET 8 SDK.

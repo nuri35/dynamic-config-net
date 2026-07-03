@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using DynamicConfig.Library.Conversion;
 using DynamicConfig.Library.Exceptions;
+using DynamicConfig.Library.Messaging;
 using DynamicConfig.Library.Snapshot;
 using DynamicConfig.Library.Storage;
 using DynamicConfig.Library.Storage.Mongo;
@@ -32,6 +33,12 @@ public sealed class ConfigurationReader : IDisposable, IAsyncDisposable
     private readonly PeriodicTimer _refreshTimer;
     private readonly CancellationTokenSource _refreshLoopCancellation = new();
     private readonly Task _refreshLoop;
+
+    // Phase 5.2 instant-refresh consumer (ADR 0005). Null = polling-only mode:
+    // opting in happens via the DYNAMIC_CONFIG_RABBITMQ_URI environment variable
+    // (the case-frozen ctor has no broker slot) or the internal test seam.
+    private readonly IConfigurationChangeSource? _changeSource;
+    private readonly Task _consumerStart;
     private int _disposeState = NotDisposed;
 
     // The single mutable cell of the whole library (ADR 0002). Written only via
@@ -66,7 +73,8 @@ public sealed class ConfigurationReader : IDisposable, IAsyncDisposable
     internal ConfigurationReader(
         string applicationName,
         IConfigurationStorageProvider storageProvider,
-        int refreshTimerIntervalInMs)
+        int refreshTimerIntervalInMs,
+        IConfigurationChangeSource? changeSource = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
         ArgumentNullException.ThrowIfNull(storageProvider);
@@ -77,14 +85,28 @@ public sealed class ConfigurationReader : IDisposable, IAsyncDisposable
         RefreshTimerIntervalInMs = refreshTimerIntervalInMs;
 
         // Fail-fast (ADR 0004): if this throws, the reader never starts its loop.
+        // Deliberate asymmetry with the broker below — Mongo is the DATA SOURCE
+        // (no data, no working reader), the broker is only the ACCELERATOR.
         _snapshot = LoadInitialSnapshot();
 
         _refreshTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(refreshTimerIntervalInMs));
         _refreshLoop = RunRefreshLoopAsync();
+
+        // Phase 5.2 opt-in: seam-injected source (tests) or the environment
+        // variable. Startup is backgrounded and failure-swallowed — a dead broker
+        // must never fail this constructor (contrast with the Mongo line above).
+        _changeSource = changeSource ?? CreateChangeSourceFromEnvironment();
+        _consumerStart = StartConsumerSafelyAsync();
     }
 
     /// <summary>The polling period, exactly as passed to the constructor.</summary>
     internal int RefreshTimerIntervalInMs { get; }
+
+    /// <summary>Whether instant refresh was opted into (env var or test seam). Mode flag, not health.</summary>
+    internal bool IsInstantRefreshConfigured => _changeSource is not null;
+
+    /// <summary>Lets tests await the consumer-start attempt deterministically (it never faults).</summary>
+    internal Task WaitForConsumerStartAsync() => _consumerStart;
 
     /// <summary>
     /// Returns the value of <paramref name="key"/> converted to <typeparamref name="T"/>.
@@ -166,12 +188,97 @@ public sealed class ConfigurationReader : IDisposable, IAsyncDisposable
         // the loop may still be observing its token right now.
     }
 
-    /// <summary>Complete teardown: stops the loop, awaits it, releases everything. Idempotent.</summary>
+    /// <summary>Complete teardown: stops the loop and the consumer, awaits both, releases everything. Idempotent.</summary>
     public async ValueTask DisposeAsync()
     {
         Dispose();
-        await _refreshLoop.ConfigureAwait(false); // never faults: the loop swallows shutdown
-        _refreshLoopCancellation.Dispose();       // multiple Dispose calls are safe by contract
+        await _refreshLoop.ConfigureAwait(false);    // never faults: the loop swallows shutdown
+        await _consumerStart.ConfigureAwait(false);  // never faults: start swallows broker failures
+
+        if (_changeSource is not null)
+        {
+            // Closes channel + connection; the exclusive auto-delete queue dies
+            // with them server-side — no orphaned consumers. Disposing an already
+            // disposed AMQP object is a no-op, so double-DisposeAsync stays safe.
+            await _changeSource.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _refreshLoopCancellation.Dispose();          // multiple Dispose calls are safe by contract
+    }
+
+    /// <summary>
+    /// Resolves the opt-in: DYNAMIC_CONFIG_RABBITMQ_URI present and non-blank →
+    /// a RabbitMQ change source; absent/blank → null (polling-only, zero broker
+    /// code on any path). Absence is a MODE, not an error — the case-frozen
+    /// constructor has no broker slot, so the environment is the opt-in channel.
+    /// </summary>
+    private static IConfigurationChangeSource? CreateChangeSourceFromEnvironment()
+    {
+        var brokerUri = Environment.GetEnvironmentVariable(
+            RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName);
+
+        return string.IsNullOrWhiteSpace(brokerUri)
+            ? null
+            : new RabbitMqConfigurationChangeSource(brokerUri);
+    }
+
+    /// <summary>
+    /// Starts the instant-refresh consumer in the background. NEVER throws: a
+    /// broker unreachable at start is logged and the reader runs polling-only —
+    /// the accelerator-not-dependency rule, and the deliberate asymmetry with
+    /// ADR 0004's fail-fast (which applies to the data source, not the signal).
+    /// One log line always states the mode (discoverability for an env-var opt-in).
+    /// </summary>
+    private async Task StartConsumerSafelyAsync()
+    {
+        if (_changeSource is null)
+        {
+            Trace.TraceInformation(
+                "DynamicConfig: no broker URI ({0}) — reader for '{1}' runs in polling-only mode.",
+                RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName,
+                _applicationName);
+            return;
+        }
+
+        // Yield first so the constructor returns immediately; connection work
+        // happens on the thread pool, results are observable via _consumerStart.
+        await Task.Yield();
+
+        try
+        {
+            await _changeSource
+                .StartAsync(HandleConfigurationChangedAsync, _refreshLoopCancellation.Token)
+                .ConfigureAwait(false);
+
+            Trace.TraceInformation(
+                "DynamicConfig: broker URI found — instant-refresh consumer started for '{0}' (polling continues as the guaranteed base).",
+                _applicationName);
+        }
+        catch (Exception brokerFailure)
+        {
+            Trace.TraceWarning(
+                "DynamicConfig: broker unreachable at startup for '{0}'; continuing in polling-only mode. {1}",
+                _applicationName,
+                brokerFailure);
+        }
+    }
+
+    /// <summary>
+    /// The consumer callback: foreign application → silent drop (no refresh, no
+    /// storage read); own application → early-trigger the EXISTING Phase 3
+    /// refresh path. The broker adds no new data path.
+    /// </summary>
+    private async Task HandleConfigurationChangedAsync(ConfigurationChangedEvent changedEvent)
+    {
+        if (!string.Equals(changedEvent.ApplicationName, _applicationName, StringComparison.Ordinal))
+        {
+            Trace.TraceInformation(
+                "DynamicConfig: dropped config-changed event for foreign application '{0}'.",
+                changedEvent.ApplicationName);
+            return;
+        }
+
+        await RefreshSnapshotAsync().ConfigureAwait(false);
     }
 
     private async Task RunRefreshLoopAsync()

@@ -15,7 +15,8 @@
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5116",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DYNAMIC_CONFIG_RABBITMQ_URI": "amqp://guest:guest@localhost:5672"
       }
     },
     "https": {

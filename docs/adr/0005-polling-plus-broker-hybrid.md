@@ -38,15 +38,15 @@ On message: if `event.applicationName` ≠ own application name → **drop silen
 
 Isolation note: a foreign event carries only an application name, never values, so observing and dropping it violates nothing — and the refresh it would have triggered still runs the `(ApplicationName, IsActive)`-filtered query anyway.
 
-## Pending detail — resolved at implementation start, with the user
+## Pending detail — RESOLVED 2026-07-03 (5.2 kickoff, with the user)
 
-The case-frozen 3-parameter constructor (`applicationName, connectionString, refreshTimerIntervalInMs`) has **no broker-address parameter**, so where the consumer's RabbitMQ address comes from is deliberately **unresolved** in this ADR. Candidate options (listed, not decided):
+The case-frozen 3-parameter constructor has no broker-address parameter. **Decision: option 1 — the `DYNAMIC_CONFIG_RABBITMQ_URI` environment variable** (name lives in `RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName`).
 
-1. An optional configuration/environment mechanism outside the constructor (e.g. an environment variable the library reads if present).
-2. Deriving the broker address from a combined/extended connection string.
-3. A library-level opt-in API (e.g. an optional method or factory) that leaves the frozen 3-param surface untouched.
+- Present and non-blank → the reader starts the instant-refresh consumer alongside polling (hybrid mode).
+- Absent or blank → no consumer is constructed at all — pure polling, exactly the CORE behavior. Absence is a mode, not an error.
+- One startup trace line always states the mode — the discoverability antidote for an environment-variable contract, together with a README section and XML docs on the public constant.
 
-**Do not implement any of these before the decision is made with the user.**
+Rejected at decision time: a combined/extended connection string (overloads the case-specified Mongo parameter with foreign semantics and invites parse ambiguity) and an opt-in API (grows the deliberately minimal public surface and still needs an address from somewhere; the env var composes better with containers).
 
 ## Consequences
 

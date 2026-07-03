@@ -1,4 +1,4 @@
-using System.Text.Json;
+using DynamicConfig.Library.Messaging;
 using RabbitMQ.Client;
 
 namespace DynamicConfig.WebUI.Messaging;
@@ -11,10 +11,6 @@ namespace DynamicConfig.WebUI.Messaging;
 /// </summary>
 public sealed class RabbitMqConfigurationChangePublisher : IConfigurationChangePublisher, IAsyncDisposable
 {
-    // camelCase on the wire, matching the API's JSON conventions; the 5.2
-    // consumer must deserialize with the same profile.
-    private static readonly JsonSerializerOptions WireJsonOptions = new(JsonSerializerDefaults.Web);
-
     private readonly ConnectionFactory _connectionFactory;
 
     // The channel is created once and reused; RabbitMQ.Client's automatic
@@ -46,7 +42,9 @@ public sealed class RabbitMqConfigurationChangePublisher : IConfigurationChangeP
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
 
         var channel = await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
-        var body = BuildEventBody(applicationName, DateTime.UtcNow);
+        // The wire contract lives in the library (5.2 shared kernel): publisher
+        // and consumer serialize/parse the SAME type — drift is impossible.
+        var body = new ConfigurationChangedEvent(applicationName, DateTime.UtcNow).ToUtf8Json();
 
         // Fanout ignores the routing key; empty by convention.
         await channel
@@ -57,17 +55,6 @@ public sealed class RabbitMqConfigurationChangePublisher : IConfigurationChangeP
                 cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
-
-    /// <summary>
-    /// The wire contract, in one place: exactly ADR 0005's thin event —
-    /// <c>{ applicationName, occurredAtUtc }</c>, nothing else. No values, no
-    /// record ids: a signal that says "go look", never state.
-    /// </summary>
-    internal static byte[] BuildEventBody(string applicationName, DateTime occurredAtUtc) =>
-        JsonSerializer.SerializeToUtf8Bytes(
-            new ConfigurationChangedEvent(applicationName, occurredAtUtc), WireJsonOptions);
-
-    private sealed record ConfigurationChangedEvent(string ApplicationName, DateTime OccurredAtUtc);
 
     /// <summary>
     /// Creates connection + channel on first use and declares the fanout exchange
