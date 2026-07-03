@@ -186,6 +186,10 @@ Executed 2026-07-03 against the final CORE state: real browser (UI driven throug
 
 **Environment finding (not a code defect — critical for reruns):** the first outage attempt appeared to "empty" the snapshot. Root cause: TWO MongoDB instances — the native Windows `MongoDB` service bound to `127.0.0.1:27017` and the compose `dynamicconfig-mongo` container port-proxied on `0.0.0.0:27017`. When the native service stopped, connections to `localhost:27017` silently failed over to the container's EMPTY database; the poll *succeeded* with zero records, and the library correctly swapped in what storage returned. The library's contract distinguishes "storage unreachable" (keep last-good) from "storage says you have no records" (believe it) — both behaviors are correct. Lesson pinned here for the compose rerun: never run the compose mongo and a native mongod side by side; the outage drill requires the single real instance to be the one stopped.
 
+## Visual pass (post-smoke)
+
+An AWS-Console-inspired restyle: squid-ink top nav with a brand/service label pair ("SecilStore | Dynamic Config"), light page with white bordered cards, single orange accent on the primary action, console-style table (uppercase gray header, row hover, horizontal borders), status as colored dot + text, AWS-style inputs with orange focus ring and red field errors. **CSS-only by rule:** `style.css` rewritten, `index.html` gained only the two sanctioned hooks (header brand spans, empty-state copy), `app.js` untouched (verified by diff). Re-smoked after: filter still narrows with zero `/api/` requests on an armed network log, the `int`/`abc` error still renders under the Value input, create/edit round-trips intact — zero behavior drift.
+
 ## Deviations from plan
 
 One addition beyond the planned scope: the smoke-caught update-path `IsActive` fix described above touched 4.1's service (`UpdateAsync` signature) and 4.2's controller (one argument). No broker code, no framework, no JS test tooling; the `/` → `/swagger` redirect from 4.2 was replaced by the UI as planned (Swagger remains reachable and linked).

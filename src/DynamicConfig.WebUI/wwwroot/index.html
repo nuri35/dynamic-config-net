@@ -8,7 +8,12 @@
 </head>
 <body>
   <header>
-    <h1>DynamicConfig <span class="accent">Admin</span></h1>
+    <!-- AWS-style brand + service label pair; text only, no logo asset. -->
+    <h1>
+      <span class="brand">SecilStore</span>
+      <span class="brand-divider" aria-hidden="true"></span>
+      <span class="service-name">Dynamic Config</span>
+    </h1>
     <a class="doc-link" href="/swagger">API docs</a>
   </header>
 
@@ -84,7 +89,7 @@
       </thead>
       <tbody id="records-body"></tbody>
     </table>
-    <p id="empty-message" class="empty-message" hidden>No configuration records match.</p>
+    <p id="empty-message" class="empty-message" hidden>No configurations yet — add your first record.</p>
   </main>
 
   <script src="app.js"></script>
