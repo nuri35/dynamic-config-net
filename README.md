@@ -18,14 +18,14 @@ flowchart LR
     end
 
     MONGO[("MongoDB<br/>configuration records")]
-    UI["WebUI<br/>REST API + frontend<br/>(list / add / update / filter)"]
+    UI["WebUI (admin) — REST API /api/configurations + Swagger, frontend<br/>DTO shape check → service rules → admin repository<br/>errors as RFC 7807 ProblemDetails"]
 
     APP -- "lock-free read" --> CR
     CR --> SNAP
     POLL -- "atomic swap" --> SNAP
     POLL --> PROV
     PROV -- "ApplicationName + IsActive<br/>filtered query" --> MONGO
-    UI -- "CRUD" --> MONGO
+    UI -- "validated writes —<br/>same collection the pollers read" --> MONGO
 ```
 
 > A RabbitMQ event path (WebUI publishes `config-changed`, the library refreshes instantly) is a planned EXTRA — see [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md).
@@ -40,6 +40,7 @@ flowchart LR
 4. **Resilience** — if storage becomes unreachable, the refresh cycle fails *silently for readers*: the last successfully loaded snapshot stays in place and `GetValue<T>` keeps serving it. When storage recovers, the next cycle swaps in fresh data.
    *First-load behavior:* **fail-fast** — if storage is unreachable at startup, the constructor throws. The fallback clause presupposes at least one successful load, a config-less service would misbehave on every read anyway, and a boot-time failure plugs straight into orchestrator restart policies ([ADR 0004](docs/adr/0004-fail-fast-initial-load.md)).
 5. **Isolation** — the storage query itself filters by `ApplicationName` **and** `IsActive`. Records belonging to other services never enter a reader's memory, so isolation cannot be bypassed by an in-memory bug.
+6. **Write path (admin)** — the WebUI's REST API (`/api/configurations`, browsable via `/swagger`) writes to the **same collection the pollers read**, so a saved change reaches every consumer within one poll interval. Two validation layers with zero overlap: DTO DataAnnotations reject shape garbage at the HTTP door; the admin service enforces semantics — crucially, *Value must be parseable as the declared Type*, checked with the **library's own parser** (single source of truth: what can be written is exactly what readers can parse; collection/database names are likewise shared constants). Every write stamps `LastModifiedDate` (UTC), and all errors leave as RFC 7807 ProblemDetails (400 + `fieldName`, 404 + `recordId`, 500 with no internals leaked) from one central exception handler.
 
 *Planned EXTRA — broker-triggered refresh:* the WebUI will publish a `config-changed` event to a RabbitMQ fanout exchange on every change; each library instance consumes it and refreshes within milliseconds, with polling remaining the guaranteed fallback ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)).
 
