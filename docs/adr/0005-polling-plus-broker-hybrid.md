@@ -38,6 +38,12 @@ On message: if `event.applicationName` ≠ own application name → **drop silen
 
 Isolation note: a foreign event carries only an application name, never values, so observing and dropping it violates nothing — and the refresh it would have triggered still runs the `(ApplicationName, IsActive)`-filtered query anyway.
 
+Consumption is **autoAck with no nack/requeue choreography** — the consumer-side mirror of the publisher's no-outbox rule: a refresh that fails after a message is not broker-retried (a poison message would loop forever), because the next poll self-heals with identical convergence.
+
+Failure-policy asymmetry with [ADR 0004](0004-fail-fast-initial-load.md), stated explicitly: Mongo unreachable at construction **throws** (it is the data source — without one load the reader has nothing to serve), while the broker unreachable at construction **logs and degrades to polling-only** (it is the accelerator — its absence costs latency, never correctness). Same moment, opposite policies, opposite roles.
+
+The consumer lives **inside the library** (`ConfigurationReader`), not in a sidecar or host service, because the thing a signal refreshes — the in-memory snapshot — lives in the reader: only the reader can swap its own snapshot, so the listener must sit next to it.
+
 ## Pending detail — RESOLVED 2026-07-03 (5.2 kickoff, with the user)
 
 The case-frozen 3-parameter constructor has no broker-address parameter. **Decision: option 1 — the `DYNAMIC_CONFIG_RABBITMQ_URI` environment variable** (name lives in `RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName`).

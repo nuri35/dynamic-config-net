@@ -41,7 +41,7 @@ flowchart LR
     MQ -. "config-changed { applicationName }<br/>match → instant refresh" .-> POLL
 ```
 
-> The event path is a **signal, not state** ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md), accepted): the broker accelerates propagation to sub-second, polling remains the guaranteed base layer.
+> The event path is a **signal, not state** ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md), accepted): the broker accelerates propagation to sub-second, polling remains the guaranteed base layer. The consumer half is opt-in per reader via `DYNAMIC_CONFIG_RABBITMQ_URI` — absent, the library is pure polling.
 
 ## How It Works
 
@@ -54,7 +54,7 @@ flowchart LR
    *First-load behavior:* **fail-fast** — if storage is unreachable at startup, the constructor throws. The fallback clause presupposes at least one successful load, a config-less service would misbehave on every read anyway, and a boot-time failure plugs straight into orchestrator restart policies ([ADR 0004](docs/adr/0004-fail-fast-initial-load.md)).
 5. **Isolation** — the storage query itself filters by `ApplicationName` **and** `IsActive`. Records belonging to other services never enter a reader's memory, so isolation cannot be bypassed by an in-memory bug.
 6. **Write path (admin)** — the WebUI's REST API (`/api/configurations`, browsable via `/swagger`) writes to the **same collection the pollers read**, so a saved change reaches every consumer within one poll interval. Two validation layers with zero overlap: DTO DataAnnotations reject shape garbage at the HTTP door; the admin service enforces semantics — crucially, *Value must be parseable as the declared Type*, checked with the **library's own parser** (single source of truth: what can be written is exactly what readers can parse; collection/database names are likewise shared constants). Every write stamps `LastModifiedDate` (UTC), and all errors leave as RFC 7807 ProblemDetails (400 + `fieldName`, 404 + `recordId`, 500 with no internals leaked) from one central exception handler.
-7. **Instant refresh (broker, Phase 5)** — after every successful write the WebUI publishes a thin `config-changed` signal (`{ applicationName, occurredAtUtc }` — never values) to a RabbitMQ fanout exchange; each reader instance consumes on its own exclusive auto-delete queue, drops foreign application names, and on a match early-triggers the same refresh path the poller uses. Sub-second propagation when the broker is healthy — and if it isn't, **polling still converges within one interval**: the broker is an accelerator, never a dependency ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)).
+7. **Instant refresh (broker, Phase 5)** — after every successful write the WebUI publishes a thin `config-changed` signal (`{ applicationName, occurredAtUtc }` — never values) to a RabbitMQ fanout exchange; each reader instance consumes on its own exclusive auto-delete queue, drops foreign application names, and on a match early-triggers the same refresh path the poller uses. The consumer is **opt-in via the `DYNAMIC_CONFIG_RABBITMQ_URI` environment variable** (see Usage): without it the reader runs pure polling, byte-identical to the core. Sub-second propagation when the broker is healthy — measured at ~1 s end-to-end against a 60 s poll interval — and if it isn't, **polling still converges within one interval**: the broker is an accelerator, never a dependency ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)).
 
 ### Record schema
 
@@ -88,7 +88,7 @@ Every architectural decision is captured as an ADR in [`docs/adr/`](docs/adr/); 
 
 ### Why polling + broker hybrid — [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)
 - **Polling** (mandatory, always on) gives *guaranteed consistency*: correct with no extra infrastructure, catches anything a lost message would miss.
-- **Broker (RabbitMQ)** adds *low latency*: a fanout `config-changed` event refreshes every subscribed reader within milliseconds of a UI change. Events are signals, not state — MongoDB stays the single source of truth.
+- **Broker (RabbitMQ)** adds *low latency*: a fanout `config-changed` event refreshes every subscribed reader within milliseconds of a UI change. Events are signals, not state — MongoDB stays the single source of truth. (Fanout over topic deliberately: config changes are rare, so consumer-side filtering is free; topic-with-routing-key=`applicationName` is the documented at-scale alternative.)
 - Each covers the other's weakness: broker down → polling still converges; long poll interval → broker still delivers instant updates.
 - The event is deliberately thin (`applicationName` + timestamp, no values): redelivery is harmless (refresh is idempotent), no second source of truth, no sensitive data in flight. A publish failure never fails the write — log-and-continue, polling carries it.
 
