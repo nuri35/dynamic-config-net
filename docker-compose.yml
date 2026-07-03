@@ -15,8 +15,22 @@ services:
     networks:
       - dynamicconfig
 
-  # --- EXTRA phases (added only after the Phase 4 core checkpoint) ---
-  # rabbitmq:     rabbitmq:3-management — config-changed fanout exchange (Phase 5)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: dynamicconfig-rabbitmq
+    ports:
+      - "5672:5672"     # AMQP - publisher/consumer traffic
+      - "15672:15672"   # management UI (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - dynamicconfig
+
+  # --- EXTRA phases (remaining) ---
   # webui:        ASP.NET Core REST API + frontend (containerized in Phase 6)
   # demoservice:  sample consumer of DynamicConfig.Library (containerized in Phase 6)
 

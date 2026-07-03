@@ -1,5 +1,6 @@
 using DynamicConfig.Library.Storage.Mongo;
 using DynamicConfig.WebUI.ErrorHandling;
+using DynamicConfig.WebUI.Messaging;
 using DynamicConfig.WebUI.Services;
 using DynamicConfig.WebUI.Storage;
 using Microsoft.OpenApi.Models;
@@ -25,6 +26,15 @@ builder.Services.AddSingleton<IMongoDatabase>(_ =>
 });
 builder.Services.AddSingleton<IConfigurationAdminRepository, MongoConfigurationAdminRepository>();
 builder.Services.AddSingleton<IConfigurationAdminService, ConfigurationAdminService>();
+
+// Broker signal (ADR 0005, Phase 5.1): lazy publisher — no connection at boot,
+// so the WebUI serves fully even with RabbitMQ down. Env override comes free
+// via configuration (ConnectionStrings__RabbitMq).
+const string rabbitMqConnectionStringName = "RabbitMq";
+var rabbitMqUri = builder.Configuration.GetConnectionString(rabbitMqConnectionStringName)
+    ?? "amqp://guest:guest@localhost:5672";
+builder.Services.AddSingleton<IConfigurationChangePublisher>(
+    _ => new RabbitMqConfigurationChangePublisher(rabbitMqUri));
 
 // --- HTTP surface ----------------------------------------------------------------
 builder.Services.AddControllers();

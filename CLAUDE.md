@@ -40,7 +40,8 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 
 | Phase | Scope | Status | Completed | Outcome | Doc |
 |---|---|---|---|---|---|
-| 5 | RabbitMQ instant refresh (publisher + consumer, graceful degradation, ADR 0005) | in progress | — | Docs-first kickoff landed 2026-07-03: ADR 0005 accepted (hybrid/fanout/thin-event/failure policies), architecture + README promoted, broker-address-vs-frozen-ctor question PENDING (resolved with user at implementation start) | [phase-5](docs/phases/phase-5.md) |
+| 5.1 | RabbitMQ publisher (WebUI side: seam + fanout publish, fire-and-forget) | done | 2026-07-03 | `IConfigurationChangePublisher` seam + lazy self-healing RabbitMQ impl; publish AFTER Mongo success, failure = log-and-continue (201 stays 201, proven live with broker stopped); thin event pinned by test; rabbitmq:3-management in compose; 172/172 tests. Exchange-constant placement flagged for 5.2 | [phase-5](docs/phases/phase-5.md) |
+| 5.2 | RabbitMQ consumer (library side: exclusive queue, match → refresh, polling-only degradation) | pending | — | Gated on two user decisions: broker-address channel vs frozen ctor; exchange-constant placement | [phase-5](docs/phases/phase-5.md) |
 | 6 | Full docker-compose ecosystem (mongo + rabbitmq + webui + demoservice) | pending | — | — | — |
 | 7 | Documentation polish (README final pass, diagrams, coverage checklist) | pending | — | — | — |
 
@@ -81,3 +82,4 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 - NuGet had zero configured sources on this machine; `nuget.org` was added manually (`dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org`).
 - Case source PDF (Turkish): `C:\Users\Nurie\Downloads\Backend Developer Code Case.pdf`.
 - **Mongo: docker-only on this machine (2026-07-03).** The native Windows `MongoDB` service is stopped and set to `Disabled` after the e2e shadow-Mongo finding (two listeners on 27017 fail over silently). Use `docker compose up -d`; the container DB carries the seeded demo dataset (SERVICE-A/B records).
+- **RabbitMQ: same shadow hazard (2026-07-03).** A native Windows `RabbitMQ` service existed and was **stopped** (not disabled — user said "for now") before the 5.1 smoke; only the compose `dynamicconfig-rabbitmq` may listen on 5672. If broker behavior looks odd, check listeners on 5672 first.

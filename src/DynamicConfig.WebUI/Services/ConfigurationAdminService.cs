@@ -1,6 +1,7 @@
 using DynamicConfig.Library.Conversion;
 using DynamicConfig.Library.Models;
 using DynamicConfig.WebUI.Exceptions;
+using DynamicConfig.WebUI.Messaging;
 using DynamicConfig.WebUI.Storage;
 
 namespace DynamicConfig.WebUI.Services;
@@ -22,10 +23,17 @@ namespace DynamicConfig.WebUI.Services;
 public sealed class ConfigurationAdminService : IConfigurationAdminService
 {
     private readonly IConfigurationAdminRepository _repository;
+    private readonly IConfigurationChangePublisher _changePublisher;
+    private readonly ILogger<ConfigurationAdminService> _logger;
 
-    public ConfigurationAdminService(IConfigurationAdminRepository repository)
+    public ConfigurationAdminService(
+        IConfigurationAdminRepository repository,
+        IConfigurationChangePublisher changePublisher,
+        ILogger<ConfigurationAdminService> logger)
     {
         _repository = repository;
+        _changePublisher = changePublisher;
+        _logger = logger;
     }
 
     public Task<IReadOnlyList<ConfigurationRecord>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -51,7 +59,10 @@ public sealed class ConfigurationAdminService : IConfigurationAdminService
         // possible for staging a record ahead of activation.
         record.IsActive = isActive ?? true;
         record.LastModifiedDate = DateTime.UtcNow;
-        return await _repository.CreateAsync(record, cancellationToken);
+        var created = await _repository.CreateAsync(record, cancellationToken);
+
+        await PublishChangeSafelyAsync(created.ApplicationName, cancellationToken);
+        return created;
     }
 
     public async Task<ConfigurationRecord> UpdateAsync(ConfigurationRecord record, bool? isActive = null, CancellationToken cancellationToken = default)
@@ -70,7 +81,30 @@ public sealed class ConfigurationAdminService : IConfigurationAdminService
             throw new ConfigurationRecordNotFoundException(record.Id);
         }
 
+        await PublishChangeSafelyAsync(record.ApplicationName, cancellationToken);
         return record;
+    }
+
+    /// <summary>
+    /// Fire-and-forget signal after a successful write (ADR 0005): a publish
+    /// failure is logged and swallowed — the broker is an accelerator, never a
+    /// dependency, and polling delivers the change within one interval anyway.
+    /// Deliberately no retry/outbox: that machinery buys nothing while a
+    /// guaranteed carrier already exists.
+    /// </summary>
+    private async Task PublishChangeSafelyAsync(string applicationName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _changePublisher.PublishChangedAsync(applicationName, cancellationToken);
+        }
+        catch (Exception publishFailure)
+        {
+            _logger.LogWarning(
+                publishFailure,
+                "config-changed publish failed for application '{ApplicationName}'; the write succeeded and polling will deliver the change.",
+                applicationName);
+        }
     }
 
     /// <summary>

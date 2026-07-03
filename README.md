@@ -125,7 +125,7 @@ Prerequisites: Docker (for storage) + .NET 8 SDK.
 > **The compose Mongo is the only supported setup:** if a native `mongod` is installed, stop it before starting — two listeners on 27017 silently shadow each other, and a stop of one fails over to the other's (empty) database instead of producing a real outage (finding documented in [phase-4.md](docs/phases/phase-4.md)).
 
 ```bash
-# 1. Start storage
+# 1. Start storage + broker
 docker-compose up -d
 
 # 2. Run the web UI and the demo service
@@ -138,6 +138,7 @@ dotnet run --project src/DynamicConfig.DemoService
 | Web UI (config management) | http://localhost:8080 | list / add / update, client-side name filter |
 | Demo service (library consumer) | http://localhost:8081 | shows live config values for `SERVICE-A` |
 | MongoDB | mongodb://localhost:27017 | database `DynamicConfigDb` (default when the connection string names none) |
+| RabbitMQ | amqp://localhost:5672 · UI http://localhost:15672 (guest/guest) | fanout `dynamicconfig.config-changed` — optional: the WebUI boots and serves fully without it; publish failures degrade to polling |
 
 Change a value in the Web UI and watch the demo service pick it up within one poll interval — sub-second once the Phase 5 broker path lands in code (design accepted, [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)); single-command full-ecosystem docker-compose is planned for Phase 6.
 

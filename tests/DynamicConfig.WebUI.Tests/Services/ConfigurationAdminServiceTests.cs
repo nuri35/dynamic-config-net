@@ -13,11 +13,15 @@ public class ConfigurationAdminServiceTests
     private const string UnknownId = "65f1a2b3c4d5e6f7a8b9c0d2";
 
     private readonly FakeConfigurationAdminRepository _repository = new();
+    private readonly FakeConfigurationChangePublisher _changePublisher = new();
     private readonly ConfigurationAdminService _service;
 
     public ConfigurationAdminServiceTests()
     {
-        _service = new ConfigurationAdminService(_repository);
+        _service = new ConfigurationAdminService(
+            _repository,
+            _changePublisher,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigurationAdminService>.Instance);
     }
 
     private static ConfigurationRecord BuildValidRecord(
@@ -318,6 +322,72 @@ public class ConfigurationAdminServiceTests
     public async Task UpdateAsync_NullRecord_ThrowsArgumentNull()
     {
         await Assert.ThrowsAsync<ArgumentNullException>(() => _service.UpdateAsync(null!));
+    }
+
+    // --- Broker signal (ADR 0005: publish after success, fire-and-forget) ---------
+
+    [Fact]
+    public async Task CreateAsync_Success_PublishesChangeOnceWithApplicationName()
+    {
+        await _service.CreateAsync(BuildValidRecord(applicationName: "SERVICE-A"));
+
+        var published = Assert.Single(_changePublisher.PublishedApplicationNames);
+        Assert.Equal("SERVICE-A", published);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Success_PublishesChangeOnceWithApplicationName()
+    {
+        _repository.Seed(BuildValidRecord(id: ExistingId, applicationName: "SERVICE-B"));
+
+        await _service.UpdateAsync(BuildValidRecord(id: ExistingId, applicationName: "SERVICE-B"));
+
+        var published = Assert.Single(_changePublisher.PublishedApplicationNames);
+        Assert.Equal("SERVICE-B", published);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ValidationFailure_NeverPublishes()
+    {
+        var record = BuildValidRecord(type: "int", value: "abc");
+
+        await Assert.ThrowsAsync<ConfigurationValidationException>(() => _service.CreateAsync(record));
+
+        Assert.Empty(_changePublisher.PublishedApplicationNames); // no event for rejected writes
+    }
+
+    [Fact]
+    public async Task UpdateAsync_NotFound_NeverPublishes()
+    {
+        await Assert.ThrowsAsync<ConfigurationRecordNotFoundException>(
+            () => _service.UpdateAsync(BuildValidRecord(id: UnknownId)));
+
+        Assert.Empty(_changePublisher.PublishedApplicationNames);
+    }
+
+    [Fact]
+    public async Task CreateAsync_PublisherThrows_WriteStillSucceedsAndPersists()
+    {
+        // The accelerator-not-dependency rule in code form: a dead broker must not
+        // turn a persisted write into an HTTP failure — polling carries the change.
+        _changePublisher.ExceptionToThrow = new InvalidOperationException("broker down");
+
+        var created = await _service.CreateAsync(BuildValidRecord());
+
+        Assert.NotNull(created);
+        Assert.NotNull(_repository.LastCreatedRecord); // persisted despite the failed signal
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PublisherThrows_WriteStillSucceeds()
+    {
+        _repository.Seed(BuildValidRecord(id: ExistingId));
+        _changePublisher.ExceptionToThrow = new InvalidOperationException("broker down");
+
+        var updated = await _service.UpdateAsync(BuildValidRecord(id: ExistingId, value: "changed"));
+
+        Assert.Equal("changed", updated.Value);
+        Assert.Equal("changed", _repository.LastUpdatedRecord!.Value);
     }
 
     // --- Reads -------------------------------------------------------------------
