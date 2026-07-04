@@ -1,0 +1,16 @@
+# Build artifacts (host = Windows; a Linux image build must not inherit them)
+**/bin/
+**/obj/
+**/out/
+
+# Tooling / VCS / docs — irrelevant to the runtime image, keeps the context small
+.git/
+.gitignore
+.vs/
+.vscode/
+.claude/
+docs/
+tests/
+**/*.user
+**/.DS_Store
+README.md

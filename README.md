@@ -136,27 +136,43 @@ One startup trace line always states which mode the reader is in ("instant-refre
 
 ## Running the Project
 
-Prerequisites: Docker (for storage) + .NET 8 SDK.
+Prerequisites: Docker Desktop (with the Compose v2 plugin — the `docker compose` subcommand). Nothing else; the .NET SDK is only needed for the dev-mode alternative below.
 
-> **The compose Mongo is the only supported setup:** if a native `mongod` is installed, stop it before starting — two listeners on 27017 silently shadow each other, and a stop of one fails over to the other's (empty) database instead of producing a real outage (finding documented in [phase-4.md](docs/phases/phase-4.md)).
+> **Keep the published ports free — the containers must be the only listeners.** Before starting, make sure nothing else on the host holds `27017` (Mongo), `5672`/`15672` (RabbitMQ), `8080` (Web UI) or `8081` (demo). A pre-existing listener on a port silently shadows the container's mapping — e.g. a native `mongod`/`RabbitMQ` service, or any local web server on `8080` — so requests reach the wrong process instead of producing an obvious error. Stop (and ideally disable) such services first; shadow-port findings are documented in [phase-4.md](docs/phases/phase-4.md), [phase-5.md](docs/phases/phase-5.md) and [phase-6.md](docs/phases/phase-6.md).
+
+### Compose (recommended — one command boots everything)
 
 ```bash
-# 1. Start storage + broker
-docker-compose up -d
+docker compose up -d --build
+```
 
-# 2. Run the web UI and the demo service
+That builds and starts all four services in dependency order: `mongo` and `rabbitmq` come up first, and `webui` + `demoservice` wait for both to report healthy before they start.
+
+| Service | URL | Notes |
+|---|---|---|
+| Web UI (config management) | http://localhost:8080 | list / add / update, client-side name filter; Swagger at `/swagger` |
+| Demo service (library consumer) | http://localhost:8081 | live config values for `SERVICE-A` (`GET /` + a console line every 2s) |
+| MongoDB | mongodb://localhost:27017 | database `DynamicConfigDb` |
+| RabbitMQ | amqp://localhost:5672 · UI http://localhost:15672 (guest/guest) | fanout `dynamicconfig.config-changed`; the demo service runs in hybrid mode (broker + polling) |
+
+**First run starts with an empty database — that is expected.** The Web UI is the seeding tool: open http://localhost:8080, click **Add configuration**, and create a record (e.g. `Name=SiteName`, `Type=string`, `Value=soty.io`, `ApplicationName=SERVICE-A`). The demo service on http://localhost:8081 picks it up within a second via the broker (and within one 30s poll interval regardless). Records live in the `mongo-data` volume and survive `docker compose down`; use `docker compose down -v` to reset to an empty database.
+
+Shut down with `docker compose down` (keep data) or `docker compose down -v` (wipe the Mongo volume).
+
+### Dev mode (alternative — hot-reload the .NET services)
+
+Run the two .NET services on the host against containerized storage. Needs the .NET 8 SDK.
+
+```bash
+# 1. Start storage + broker only
+docker compose up -d mongo rabbitmq
+
+# 2. Run the web UI and the demo service on the host
 dotnet run --project src/DynamicConfig.WebUI
 dotnet run --project src/DynamicConfig.DemoService
 ```
 
-| Service | URL | Notes |
-|---|---|---|
-| Web UI (config management) | http://localhost:8080 | list / add / update, client-side name filter |
-| Demo service (library consumer) | http://localhost:8081 | shows live config values for `SERVICE-A` |
-| MongoDB | mongodb://localhost:27017 | database `DynamicConfigDb` (default when the connection string names none) |
-| RabbitMQ | amqp://localhost:5672 · UI http://localhost:15672 (guest/guest) | fanout `dynamicconfig.config-changed` — optional: the WebUI boots and serves fully without it; publish failures degrade to polling |
-
-Change a value in the Web UI and watch the demo service pick it up within one poll interval — sub-second once the Phase 5 broker path lands in code (design accepted, [ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)); single-command full-ecosystem docker-compose is planned for Phase 6.
+Change a value in the Web UI and watch the demo service pick it up — sub-second via the broker fanout, and within one poll interval even with the broker down ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)).
 
 ## Running Tests
 
@@ -196,11 +212,11 @@ Quality practices are embedded in the CORE phases (they are *how the code is wri
 | TDD | ✅ done (embedded in core) | tests land in the same phase as the code they specify; see commit history |
 | Unit tests | ✅ done (embedded in core) | `tests/DynamicConfig.Library.Tests` (xUnit, mocked storage) |
 | MongoDB/Redis storage | ✅ done | MongoDB (`mongo:7`), [ADR 0001](docs/adr/0001-mongodb-as-storage.md) |
-| Runnable project | ✅ done | `docker-compose up -d` (storage) + `dotnet run` per service |
+| Runnable project | ✅ done | `docker compose up -d --build` boots all four services (storage-only + `dotnet run` remains the dev-mode alternative) |
 | Documentation | ✅ done | this README + [architecture doc](docs/architecture.md) + [ADRs](docs/adr/) + [phase docs](docs/phases/) |
 | Source control | ✅ done | GitHub, conventional commits per phase |
-| Message broker | 🔜 planned (Phase 5) | RabbitMQ `config-changed` fanout: WebUI publisher + library consumer ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)) |
-| docker-compose for the whole ecosystem | 🔜 planned (Phase 6) | single command boots mongo + rabbitmq + webui + demoservice |
+| Message broker | ✅ done (Phase 5) | RabbitMQ `config-changed` fanout: WebUI publisher + library consumer ([ADR 0005](docs/adr/0005-polling-plus-broker-hybrid.md)) |
+| docker-compose for the whole ecosystem | ✅ done (Phase 6) | single command boots mongo + rabbitmq + webui + demoservice ([phase-6.md](docs/phases/phase-6.md)) |
 
 ## Repository Structure
 

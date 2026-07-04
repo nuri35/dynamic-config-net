@@ -22,17 +22,79 @@ services:
       - "5672:5672"     # AMQP - publisher/consumer traffic
       - "15672:15672"   # management UI (guest/guest)
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # check_port_connectivity (not plain ping): ping only proves the Erlang VM
+      # responds, which goes true BEFORE the AMQP listener accepts connections.
+      # depends_on: service_healthy needs "ready for AMQP", or the demo consumer's
+      # single by-design boot attempt (ADR 0005, no retry machinery) races the
+      # broker, loses, and silently degrades to polling-only until a restart.
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 5
-      start_period: 15s
+      start_period: 20s
     networks:
       - dynamicconfig
 
-  # --- EXTRA phases (remaining) ---
-  # webui:        ASP.NET Core REST API + frontend (containerized in Phase 6)
-  # demoservice:  sample consumer of DynamicConfig.Library (containerized in Phase 6)
+  webui:
+    build:
+      context: .
+      dockerfile: src/DynamicConfig.WebUI/Dockerfile
+    image: dynamicconfig-webui
+    container_name: dynamicconfig-webui
+    ports:
+      - "8080:8080"     # admin REST API + frontend + Swagger
+    environment:
+      # Double-underscore is ASP.NET's config nesting separator: ConnectionStrings:Mongo.
+      # Hostnames are the compose service names, resolved on the shared network.
+      ConnectionStrings__Mongo: "mongodb://mongo:27017/DynamicConfigDb"
+      ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/configurations"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - dynamicconfig
+
+  demoservice:
+    build:
+      context: .
+      dockerfile: src/DynamicConfig.DemoService/Dockerfile
+    image: dynamicconfig-demoservice
+    container_name: dynamicconfig-demoservice
+    ports:
+      - "8081:8080"     # live-values probe: GET / and a console line every 2s
+    environment:
+      ConnectionStrings__Mongo: "mongodb://mongo:27017/DynamicConfigDb"
+      # Broker opt-in (ADR 0005): present -> hybrid mode (broker + polling). This is
+      # the intended compose posture; remove it to demo polling-only.
+      DYNAMIC_CONFIG_RABBITMQ_URI: "amqp://guest:guest@rabbitmq:5672"
+      DynamicConfig__ApplicationName: "SERVICE-A"
+      # 30s poll floor: broker delivers in ms, polling still guarantees convergence.
+      DynamicConfig__RefreshTimerIntervalInMs: "30000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # Fail-fast (ADR 0004): if Mongo is briefly unreachable at boot the reader
+    # throws and the process exits — the restart policy IS the retry mechanism.
+    restart: unless-stopped
+    networks:
+      - dynamicconfig
 
 volumes:
   mongo-data:
