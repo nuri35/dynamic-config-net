@@ -43,3 +43,25 @@ On this host, `GET http://localhost:8080` reaches an **EDB Postgres Enterprise M
 
 - Full from-scratch drill above, all steps PASS.
 - `dotnet test` unaffected (213/213); no application code changed this phase — only Dockerfiles, `.dockerignore`, compose, and docs.
+
+## Evaluator simulation — final pass (2026-07-04, Türkçe rapor)
+
+Rol: case'i değerlendiren şirket yetkilisi; elde yalnızca case PDF'i + README. Temiz başlangıç (`docker compose down -v`), ardından README'nin birebir komutu. İç audit senaryoları değil, yalnızca PDF'in istedikleri test edildi.
+
+| # | PDF şartı | Gözlem | Sonuç |
+|---|---|---|---|
+| 1 | Tek komutla çalışma | `docker compose up -d --build` → 4/4 container healthy, boş DB ile | ✅ GEÇTİ |
+| 2 | Web UI: listeleme / ekleme / güncelleme / isim filtresi | PDF örnek tablosu UI'dan birebir girildi (SiteName, IsBasketEnabled/SERVICE-B, MaxItemCount/IsActive=0); "max" filtresi anında, fetch'siz tek satıra indirdi; Edit ile değer+IsActive güncellendi | ✅ GEÇTİ |
+| 3 | Kütüphane kendi aktif kayıtlarını kendi tipinde döner | DemoService (SERVICE-A): `SiteName=soty.io` (string) VAR; `MaxItemCount` IsActive=0 iken YOK; SERVICE-B'nin `IsBasketEnabled` kaydı hiç görünmüyor | ✅ GEÇTİ |
+| 4 | `GetValue<string>("SiteName")` → `"soty.io"` | Demo `GET /` ve konsol satırları: `SiteName=soty.io` | ✅ GEÇTİ |
+| 5 | Çalışırken eklenen/değişen kayıt güncellenir | Ekleme: UI kaydı 06:20:44 → demo 06:20:44 satırında görünür (aynı saniye, broker; poll tikleri 06:20:35/06:21:05). Güncelleme: 06:23:22 kaydet → 06:23:22 demo satırında `MaxItemCount=75` (restart yok). Polling tabanı compose'da `RefreshTimerIntervalInMs=30000` ile parametrik | ✅ GEÇTİ |
+| 6 | Storage erişilemezse son başarılı kayıtlarla devam | Mongo 06:24:19'da durduruldu; 55 sn sonra (≥1 poll döngüsü) demo aynı değerleri servis ediyor, container healthy; Mongo geri açılınca UI listesi tazelenmiş veriyle geldi | ✅ GEÇTİ |
+| 7 | Ekstra puanlar | Broker canlı (aynı-saniye yayılım ×2); `dotnet test` tek koşu 213/213 (Library 131 + WebUI 82, 0 fail); docker-compose ✓; README 2 dk okumada projeyi ve çalıştırmayı net anlatıyor | ✅ GEÇTİ |
+
+**Değerlendiren gözüyle takıldığım noktalar (kod defekti değil):**
+
+1. **Mod trace satırı `docker logs`'ta görünmüyor.** README "one startup trace line always states the mode" diyor; kütüphane `System.Diagnostics.Trace` kullandığı ve container'da konsol listener'ı olmadığı için değerlendiren bu satırı `docker logs`'ta bulamıyor. Davranış ms-seviyesi yayılımla kanıtlı ama vaat edilen gözlemlenebilirlik kanalı compose kurulumunda sessiz.
+2. **xUnit1031 uyarısı** — `AuditBlock1EdgeTests.cs(121)`: testte bloklayan task operasyonu uyarısı. Koşuyu etkilemiyor (213/213) ama temiz build çıktısında göze çarpıyor.
+3. **8080 gölgesi bu makinede IPv4/IPv6'ya bölünmüş durumda:** `127.0.0.1:8080` → EDB Apache (404), `[::1]:8080` → WebUI Kestrel. Tarayıcı IPv6'yı seçtiği için UI çalışıyor; IPv4 istemcileri Apache'ye düşüyor. Ortam bulgusu — README'nin "port boş olsun" uyarısı bu riski zaten açıkça belgeliyor; temiz bir değerlendirme makinesinde yaşanmaz.
+
+Sonuç: PDF'in tüm zorunlu şartları ve ekstra puan kalemleri, yalnızca README bilgisiyle, tek komutluk kurulumdan itibaren doğrulandı. Kod değişikliği gerektiren defect çıkmadı.
