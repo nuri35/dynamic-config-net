@@ -14,6 +14,7 @@ public sealed class ConfigurationKeyNotFoundException : DynamicConfigurationExce
     /// <summary>The application whose records were searched.</summary>
     public string ApplicationName { get; }
 
+    /// <summary>Creates the exception for <paramref name="key"/> missing in <paramref name="applicationName"/>'s active records.</summary>
     public ConfigurationKeyNotFoundException(string key, string applicationName)
         : base($"Configuration key '{key}' was not found among the active records of application '{applicationName}'.")
     {

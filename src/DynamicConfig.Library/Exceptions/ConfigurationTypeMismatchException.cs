@@ -17,6 +17,7 @@ public sealed class ConfigurationTypeMismatchException : DynamicConfigurationExc
     /// <summary>The type the caller requested (e.g. <c>"Double"</c>).</summary>
     public string RequestedType { get; }
 
+    /// <summary>Creates the exception for a request of <paramref name="requestedType"/> against a record declared as <paramref name="declaredType"/>.</summary>
     public ConfigurationTypeMismatchException(string key, string declaredType, string requestedType)
         : base($"Configuration key '{key}' declares type '{declaredType}' and cannot be served as requested type '{requestedType}'. Supported types: string, int, double, bool; no implicit widening.")
     {

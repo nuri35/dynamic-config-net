@@ -17,6 +17,7 @@ public sealed class ConfigurationValueFormatException : DynamicConfigurationExce
     /// <summary>The raw stored value that failed to convert.</summary>
     public string RawValue { get; }
 
+    /// <summary>Creates the exception for <paramref name="rawValue"/> failing to convert to the record's declared <paramref name="declaredType"/>.</summary>
     public ConfigurationValueFormatException(string key, string declaredType, string rawValue)
         : base($"Configuration key '{key}' declares type '{declaredType}' but its stored value '{rawValue}' cannot be converted to that type. Fix the record's Value in the management UI.")
     {

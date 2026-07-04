@@ -6,6 +6,7 @@ namespace DynamicConfig.Library.Exceptions;
 /// </summary>
 public abstract class DynamicConfigurationException : Exception
 {
+    /// <summary>Initializes the base with the derived type's message.</summary>
     protected DynamicConfigurationException(string message)
         : base(message)
     {
