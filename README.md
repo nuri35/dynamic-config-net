@@ -225,3 +225,11 @@ dynamic-config-net/
 ## Development Workflow
 
 Development was AI-assisted using a structured phase/ADR workflow I designed: work proceeds in reviewed phases (each documented in [`docs/phases/`](docs/phases/)), every architectural decision is recorded as an ADR in [`docs/adr/`](docs/adr/), and the project constitution ([`CLAUDE.md`](CLAUDE.md)) plus custom compliance/review skills in [`.claude/`](.claude/) — including an automated build+test hook on every code edit — keep the process verifiable. The `.claude/` directory is committed intentionally to make that workflow inspectable.
+
+## Deliberate Non-Goals
+
+Scope lines drawn on purpose (surfaced by the library audit), not omissions:
+
+- **`netstandard2.0` multi-targeting** — the case mandates .NET 8; classic .NET Framework/WCF consumers would require multi-targeting plus a MongoDB/RabbitMQ driver downgrade audit.
+- **NuGet packaging metadata** (PackageId, version, license) — the deliverable is a project-referenced dll per the case; packaging is a distribution concern outside the brief.
+- **Finalizer/`SafeHandle` for an undisposed reader** — an undisposed `ConfigurationReader` keeps polling for the process lifetime, which is exactly its contract; disposal is the host's job (`await using`), as with any `IHostedService`-style resource, and a finalizer is not warranted for managed-only resources.

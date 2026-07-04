@@ -390,6 +390,46 @@ public class ConfigurationAdminServiceTests
         Assert.Equal("changed", _repository.LastUpdatedRecord!.Value);
     }
 
+    // --- Audit Block 2 pins: defined write-path behavior ---------------------------
+
+    [Fact]
+    public async Task CreateAsync_DuplicateNameAndApplication_IsAllowedByDesign()
+    {
+        // No unique index, no service check — deliberate: the library's snapshot
+        // resolves duplicates downstream (latest LastModifiedDate wins, pinned in
+        // the library tests). The write path must neither block nor corrupt this.
+        await _service.CreateAsync(BuildValidRecord(name: "Dup", value: "first"));
+        var second = await _service.CreateAsync(BuildValidRecord(name: "Dup", value: "second"));
+
+        Assert.NotNull(second);
+        Assert.Equal(2, (await _service.GetAllAsync()).Count(r => r.Name == "Dup"));
+    }
+
+    [Fact]
+    public async Task CreateAsync_OversizedValue_IsAcceptedNotRejected()
+    {
+        // 100 KB string value: no size rule exists — defined outcome is acceptance
+        // (Mongo's 16 MB document limit is the only ceiling; far away).
+        var oversized = new string('x', 100_000);
+
+        var created = await _service.CreateAsync(BuildValidRecord(value: oversized));
+
+        Assert.Equal(oversized, _repository.LastCreatedRecord!.Value);
+        Assert.NotNull(created);
+    }
+
+    [Fact]
+    public async Task CreateAsync_PaddedNameAndValue_AreStoredVerbatim()
+    {
+        // Trimming policy, stated: names/values are stored exactly as sent — the
+        // UI's NotBlank stops whitespace-ONLY input, but padding is the author's
+        // data. (Snapshot lookup is by exact stored name, case-insensitive.)
+        await _service.CreateAsync(BuildValidRecord(name: " Padded ", value: " 50 ", type: "int"));
+
+        Assert.Equal(" Padded ", _repository.LastCreatedRecord!.Name);
+        Assert.Equal(" 50 ", _repository.LastCreatedRecord.Value);
+    }
+
     // --- Reads -------------------------------------------------------------------
 
     [Fact]

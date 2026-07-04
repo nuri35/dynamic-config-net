@@ -20,7 +20,7 @@ public abstract class ConfigurationWriteRequest
     [NotBlank]
     public string Type { get; init; } = string.Empty;
 
-    /// <summary>Raw value; must be parseable as <see cref="Type"/> (validated by the service).</summary>
+    /// <summary>Raw value; must be parseable as the declared <c>Type</c> (validated by the service).</summary>
     [Required]
     public string Value { get; init; } = string.Empty;
 

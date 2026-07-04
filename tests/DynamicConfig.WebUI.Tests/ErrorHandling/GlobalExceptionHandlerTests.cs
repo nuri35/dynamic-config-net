@@ -25,6 +25,29 @@ public class GlobalExceptionHandlerTests
         Assert.Equal("Type", problem.Extensions[GlobalExceptionHandler.FieldNameExtensionKey]);
     }
 
+    // Audit Block 2 pin: the fieldName guarantee holds for EVERY factory, not just
+    // UnsupportedType — the exception's private constructor forces all instances
+    // through a factory, and each factory names the failing record field.
+    public static TheoryData<ConfigurationValidationException, string> EveryValidationFactory => new()
+    {
+        { ConfigurationValidationException.RequiredFieldMissing("Name"), "Name" },
+        { ConfigurationValidationException.MalformedId("not-an-objectid"), "Id" },
+        { ConfigurationValidationException.UnsupportedType("banana"), "Type" },
+        { ConfigurationValidationException.ValueTypeMismatch("abc", "int"), "Value" },
+    };
+
+    [Theory]
+    [MemberData(nameof(EveryValidationFactory))]
+    public void Map_EveryValidationFactory_Produces400CarryingItsFieldName(
+        ConfigurationValidationException exception,
+        string expectedFieldName)
+    {
+        var problem = GlobalExceptionHandler.MapToProblemDetails(exception);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, problem.Status);
+        Assert.Equal(expectedFieldName, problem.Extensions[GlobalExceptionHandler.FieldNameExtensionKey]);
+    }
+
     [Fact]
     public void Map_RecordNotFoundException_Produces404CarryingRecordId()
     {
