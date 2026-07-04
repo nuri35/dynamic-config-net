@@ -45,7 +45,7 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 | 5.2 | RabbitMQ consumer (library side: exclusive queue, match → refresh, polling-only degradation) | done | 2026-07-03 | Env-var opt-in (`DYNAMIC_CONFIG_RABBITMQ_URI`, decision 8); shared kernel moved to library (`RabbitMqBrokerDefaults` + `ConfigurationChangedEvent` = the wire contract, WebUI publisher now serializes the same type); internal `IConfigurationChangeSource` seam + RabbitMQ impl (exclusive auto-delete queue, autoAck/no-nack, parse-or-drop); frozen ctor character-identical; no refresh gate (verified + pinned); 187/187 tests; live smoke 1 037 ms vs 60 000 ms poll floor | [phase-5](docs/phases/phase-5.md) |
 | 5.3 | Broker e2e proof + Phase 5 closure | done | 2026-07-03 | 11-scenario live drill all PASS (steady-state broker path 6–125 ms vs 30 s floor; outage → polling carried in 15.2 s; recovery self-healed both sides; poison messages dropped; env-var-absent = zero AMQP sockets). Smoke-caught fix: publisher ghost connection per outage cycle (`AutomaticRecoveryEnabled` off — manual rebuild is the single mechanism; consumer keeps recovery). Frozen surface re-confirmed. **PHASE 5 COMPLETE** | [phase-5](docs/phases/phase-5.md) |
 | 6 | Full docker-compose ecosystem (mongo + rabbitmq + webui + demoservice) | done | 2026-07-04 | Two multi-stage Dockerfiles (repo-root context, cached csproj restore) + `.dockerignore`; compose gains webui/demoservice with health-gated `depends_on`, `__`-nested env wiring, `restart: unless-stopped`; from-scratch drill (down -v + rmi + literal `docker compose up -d --build`) → 4 healthy, empty DB → seed via UI → demo pickup, edit **75 ms** via broker. Block-4 bug caught+fixed: rabbitmq healthcheck `ping`→`check_port_connectivity` (readiness race left the demo silently polling-only on first boot); EDB Apache 8080 host-shadow flagged. No app code touched; 213/213 | [phase-6](docs/phases/phase-6.md) |
-| 7 | Documentation polish (README final pass, diagrams, coverage checklist) | pending | — | — | — |
+| 7 | Documentation polish (README final pass, diagrams, coverage checklist) | done | 2026-07-04 | Stale "planned" language swept (architecture.md EXTRA section, ADR 0002); architecture.md broker-address "pending detail" resolved to decision 8 wording incl. malformed-URI clause, README env-var table matched; coverage tables gained evidence pointers (213 tests, evaluator sim 7/7). **PROJECT COMPLETE** | [phase-7](docs/phases/phase-7.md) |
 
 ## 4. Code Standards
 
@@ -75,7 +75,7 @@ Rules: changing a locked decision requires the user's explicit approval. Any dec
 1. **CLAUDE.md** (this file) — constitution + phase table
 2. **[docs/architecture.md](docs/architecture.md)** — end-to-end picture
 3. **[ADR 0002](docs/adr/0002-atomic-snapshot-swap.md)** — the core concurrency decision (snapshot swap)
-4. **docs/phases/phase-3.md** — the most critical phase story (refresh & resilience), once it exists
+4. **[docs/phases/phase-3.md](docs/phases/phase-3.md)** — the most critical phase story (refresh & resilience)
 5. **tests/DynamicConfig.Library.Tests** — behavior specification in executable form
 
 ## 7. Local Environment Notes

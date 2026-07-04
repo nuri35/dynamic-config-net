@@ -129,7 +129,7 @@ DYNAMIC_CONFIG_RABBITMQ_URI=amqp://guest:guest@localhost:5672
 
 | State | Behavior |
 |---|---|
-| Variable set (non-blank) | The reader additionally binds an exclusive auto-delete queue to the `dynamicconfig.config-changed` fanout exchange; a matching event triggers the same refresh the poller runs. Broker unreachable? Logged, reader continues polling-only — never a boot failure. |
+| Variable set (non-blank) | The reader additionally binds an exclusive auto-delete queue to the `dynamicconfig.config-changed` fanout exchange; a matching event triggers the same refresh the poller runs. Broker unreachable, or the URI malformed? Logged, reader continues polling-only — never a boot failure. |
 | Variable absent / blank | No consumer is created at all — pure polling, byte-identical to the core behavior. Absence is a mode, not an error. |
 
 One startup trace line always states which mode the reader is in ("instant-refresh consumer started" / "polling-only mode").
@@ -200,6 +200,8 @@ The core library is fully unit-tested against a mocked `IConfigurationStoragePro
 | Web UI: list, add, update records | `src/DynamicConfig.WebUI` |
 | Client-side filtering by Name | WebUI frontend |
 
+Every row above is verified two ways: the **213-test suite** (`dotnet test` — 131 library + 82 WebUI, zero failures) and a **final evaluator simulation** — clean `docker compose down -v` start, README-only knowledge, the case walked in PDF order, 7/7 PASS ([phase-6.md](docs/phases/phase-6.md)).
+
 ### Extra points
 
 Quality practices are embedded in the CORE phases (they are *how the code is written*, not deferrable features); infrastructure extras land in EXTRA phases 5–7.
@@ -210,7 +212,7 @@ Quality practices are embedded in the CORE phases (they are *how the code is wri
 | Concurrency-safe design | ✅ done (embedded in core) | immutable snapshot + atomic reference swap, lock-free reads ([ADR 0002](docs/adr/0002-atomic-snapshot-swap.md)) |
 | Design & architectural patterns | ✅ done (embedded in core) | Strategy/Repository (`IConfigurationStorageProvider`), immutable snapshot |
 | TDD | ✅ done (embedded in core) | tests land in the same phase as the code they specify; see commit history |
-| Unit tests | ✅ done (embedded in core) | `tests/DynamicConfig.Library.Tests` (xUnit, mocked storage) |
+| Unit tests | ✅ done (embedded in core) | 213 tests: `tests/DynamicConfig.Library.Tests` (131, xUnit, mocked storage) + `tests/DynamicConfig.WebUI.Tests` (82) |
 | MongoDB/Redis storage | ✅ done | MongoDB (`mongo:7`), [ADR 0001](docs/adr/0001-mongodb-as-storage.md) |
 | Runnable project | ✅ done | `docker compose up -d --build` boots all four services (storage-only + `dotnet run` remains the dev-mode alternative) |
 | Documentation | ✅ done | this README + [architecture doc](docs/architecture.md) + [ADRs](docs/adr/) + [phase docs](docs/phases/) |

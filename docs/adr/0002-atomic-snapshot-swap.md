@@ -23,7 +23,7 @@ The current configuration lives in an **immutable dictionary snapshot** referenc
 
 **Negative**
 - Full snapshot rebuild per refresh — O(n) allocations each interval. Config sets are small (tens to hundreds of keys); irrelevant in practice.
-- Reads can be one refresh-interval stale by design; the planned broker-triggered refresh (ADR 0005, EXTRA) reduces this to milliseconds.
+- Reads can be one refresh-interval stale by design; the broker-triggered refresh (ADR 0005, shipped in Phase 5) reduces this to milliseconds.
 
 ## Alternatives Considered
 

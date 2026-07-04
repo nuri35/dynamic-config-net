@@ -1,6 +1,6 @@
 # Architecture
 
-End-to-end picture of the DynamicConfig system. For the reasoning behind each choice, see the ADRs in [`docs/adr/`](adr/). Delivery is CORE-first: everything below is mandatory scope except the explicitly marked **EXTRA (planned)** section.
+End-to-end picture of the DynamicConfig system. For the reasoning behind each choice, see the ADRs in [`docs/adr/`](adr/). Delivery was CORE-first: phases 0–4 shipped the mandatory scope, EXTRA phases 5–6 added the broker acceleration and the full docker-compose ecosystem — all sections below are implemented.
 
 ## System Overview (CORE)
 
@@ -117,8 +117,8 @@ Failure paths (both degrade to CORE behavior, by policy):
 - **Publish fails** → the write still succeeds; log-and-continue, polling carries the change within one interval.
 - **Broker down / unreachable from a consumer** → that reader runs polling-only, exactly the CORE contract.
 
-Pending detail (deliberately unresolved until implementation start): where the consumer's broker address comes from — the case-frozen 3-param ctor has no slot for it. Options catalogued in ADR 0005.
+Resolved (locked decision 8): the consumer's broker address comes from the `DYNAMIC_CONFIG_RABBITMQ_URI` environment variable — the case-frozen 3-param ctor has no slot for it. Set → hybrid mode; absent/blank **or malformed** → polling-only, never a boot failure (ADR 0005).
 
-## EXTRA (remaining — Phases 6–7)
+## Full ecosystem (Phase 6)
 
-Full docker-compose ecosystem (mongo + rabbitmq + webui + demoservice) and final documentation polish.
+One command — `docker compose up -d --build` — boots mongo + rabbitmq + webui + demoservice with health-gated startup ordering; the from-scratch drill and the evaluator simulation (7/7 PASS) are documented in [phase-6.md](phases/phase-6.md).

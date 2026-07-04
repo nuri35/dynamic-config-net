@@ -13,7 +13,7 @@ Add the speed layer on top of the mandatory polling: the WebUI publishes a `conf
 - **Thin event ("notify, don't transfer"):** payload is `{ applicationName, occurredAtUtc }` — no values in flight. Mongo stays the single source of truth; redelivery is harmless (idempotent refresh); each event costs one cheap Mongo read, accepted.
 - **Consumer behavior:** foreign `applicationName` → drop silently (no refresh, no read). Match → trigger the **existing** `RefreshSnapshotAsync` (Phase 3) — same query, same atomic swap, same last-good fallback. No new data path.
 
-## Open decision (PENDING — resolve with the user at implementation start)
+## Open decision (was PENDING — RESOLVED at 5.2 kickoff: locked decision 8, `DYNAMIC_CONFIG_RABBITMQ_URI` env-var opt-in)
 
 The case-frozen 3-param ctor has no broker-address slot. Candidates (listed, not chosen): optional config/environment mechanism outside the ctor; deriving from a combined connection string; a library-level opt-in API leaving the frozen surface untouched. **Implementation does not start until this is decided.**
 
