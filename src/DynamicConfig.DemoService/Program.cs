@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DynamicConfig.Library;
 using DynamicConfig.Library.Exceptions;
 
@@ -17,6 +18,15 @@ var applicationName = builder.Configuration["DynamicConfig:ApplicationName"] ?? 
 var connectionString = builder.Configuration.GetConnectionString("Mongo")
     ?? "mongodb://localhost:27017/DynamicConfigDb";
 var refreshTimerIntervalInMs = builder.Configuration.GetValue("DynamicConfig:RefreshTimerIntervalInMs", 5000);
+
+// The library reports its refresh mode ("instant-refresh consumer started" /
+// "polling-only mode") via System.Diagnostics.Trace so it never imposes a logging
+// framework on consumers — but a container has no Trace listener, so those lines
+// would vanish from `docker logs`. Bridging Trace to stdout is the HOST's job
+// (like choosing a transport for a bare event channel in Node), so do it here,
+// before the reader constructs and emits its mode line.
+Trace.Listeners.Add(new ConsoleTraceListener());
+Trace.AutoFlush = true;
 
 // Fail-fast by design (ADR 0004): if storage is unreachable at boot, this throws
 // and the host's restart policy owns the retry. After one successful load, the

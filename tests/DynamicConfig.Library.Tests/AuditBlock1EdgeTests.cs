@@ -106,7 +106,7 @@ public class AuditBlock1EdgeTests
     // --- 15: two readers side by side, no shared state ----------------------------------
 
     [Fact]
-    public void TwoReadersInOneProcess_HaveFullyIndependentSnapshots()
+    public async Task TwoReadersInOneProcess_HaveFullyIndependentSnapshots()
     {
         var providerA = new FakeConfigurationStorageProvider(Record("SiteName", "string", "a-value", "SERVICE-A"));
         var providerB = new FakeConfigurationStorageProvider(Record("SiteName", "string", "b-value", "SERVICE-B"));
@@ -118,7 +118,7 @@ public class AuditBlock1EdgeTests
 
         // Mutating B's world and refreshing must not leak into A.
         providerB.SetRecords(Record("SiteName", "string", "b-changed", "SERVICE-B"));
-        readerB.RefreshSnapshotAsync().GetAwaiter().GetResult();
+        await readerB.RefreshSnapshotAsync();
         Assert.Equal("a-value", readerA.GetValue<string>("SiteName"));
         Assert.Equal("b-changed", readerB.GetValue<string>("SiteName"));
     }
