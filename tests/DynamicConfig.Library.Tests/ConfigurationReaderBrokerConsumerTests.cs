@@ -133,6 +133,35 @@ public class ConfigurationReaderBrokerConsumerTests
         }
     }
 
+    [Theory]
+    [InlineData("not-a-uri")]
+    [InlineData("   still not a uri   ")]
+    public async Task MalformedBrokerUri_ReaderBootsPollingOnlyInsteadOfThrowing(string malformedUri)
+    {
+        // Audit Block 3 pin: decision 8's asymmetry must hold for INVALID config,
+        // not just absent config — a typo in the env var must never take down a
+        // boot that Mongo alone could serve. Malformed URI -> warn + polling-only.
+        var originalValue = Environment.GetEnvironmentVariable(
+            RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName);
+        Environment.SetEnvironmentVariable(
+            RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName, malformedUri);
+        try
+        {
+            var provider = new FakeConfigurationStorageProvider(ActiveRecord("SiteName", "value"));
+
+            await using var reader = new ConfigurationReader(OwnApplication, provider, LongIntervalMs);
+            await reader.WaitForConsumerStartAsync();
+
+            Assert.False(reader.IsInstantRefreshConfigured); // degraded, not opted-in
+            Assert.Equal("value", reader.GetValue<string>("SiteName")); // CORE serving normally
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(
+                RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName, originalValue);
+        }
+    }
+
     [Fact]
     public async Task ConcurrentBrokerAndManualRefreshes_SnapshotStaysConsistent()
     {

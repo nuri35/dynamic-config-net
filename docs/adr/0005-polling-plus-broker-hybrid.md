@@ -50,6 +50,7 @@ The case-frozen 3-parameter constructor has no broker-address parameter. **Decis
 
 - Present and non-blank → the reader starts the instant-refresh consumer alongside polling (hybrid mode).
 - Absent or blank → no consumer is constructed at all — pure polling, exactly the CORE behavior. Absence is a mode, not an error.
+- Present but malformed (not a parseable absolute URI) → warning trace + polling-only, constructor never throws (Block 3 audit fix, 2026-07-04): the asymmetry above covers *invalid* accelerator config the same as an unreachable broker — a typo must not fail a boot the data source alone could serve. The raw value is not echoed in the warning (broker URIs carry credentials).
 - One startup trace line always states the mode — the discoverability antidote for an environment-variable contract, together with a README section and XML docs on the public constant.
 
 Rejected at decision time: a combined/extended connection string (overloads the case-specified Mongo parameter with foreign semantics and invites parse ambiguity) and an opt-in API (grows the deliberately minimal public surface and still needs an address from somewhere; the env var composes better with containers).

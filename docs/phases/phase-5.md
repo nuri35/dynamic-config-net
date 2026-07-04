@@ -133,3 +133,14 @@ Verification phase: the system as built (5.1 publisher + 5.2 consumer) run live 
 After the B6→B7 outage cycle the WebUI held **two** AMQP connections. Root cause: two recovery mechanisms fighting — the publisher's rebuild-on-next-publish disposed the dead connection, but `AutomaticRecoveryEnabled` resurrected the disposed object when the broker returned (one leaked ghost per outage cycle). Fix where the defect lives: the **publisher** factory now sets `AutomaticRecoveryEnabled = false` (manual rebuild is its single mechanism); the **consumer** keeps auto-recovery (its only mechanism — it never disposes mid-life). No unit pin: the defect lives in AMQP connection lifecycle, deliberately not mocked (5.1 precedent); proof is the live re-drill — full outage cycle now ends with exactly **1** publisher connection, writes 200 throughout, post-fix broker path 6 ms. 187/187 tests stay green.
 
 **Phase 5 COMPLETE** — hybrid refresh implemented, documented and live-verified in both directions of failure. Frozen surface re-confirmed character-identical.
+
+## Phase 6 rerun additions (from the Block 3 audit, 2026-07-04)
+
+Multi-instance scenarios first proven in [docs/audit/block-3.md](../audit/block-3.md); rerun them on the compose stack (the containers make multi-instance trivial):
+
+| # | Scenario | Steps | Expected |
+|---|---|---|---|
+| M1 | Fanout to N instances of one app | 2× SERVICE-A consumers (distinct ports), one UI edit | BOTH refresh within ms — exclusive-queue-per-instance; a shared-queue misconfig would deliver to only one |
+| M2 | Mixed apps side by side | SERVICE-A + SERVICE-B consumers up, edit an A record | A instances refresh; B stays silent (foreign-drop), values untouched |
+| M3 | Instance death | Kill one SERVICE-A consumer | Its `amq.gen-*` queue auto-deletes (mgmt API count −1); survivor unaffected and still instant on the next edit |
+| M4 | Queue-count sanity | End of drill, all consumers stopped | 0 queues, 0 connections — no orphans accumulate across the whole drill |

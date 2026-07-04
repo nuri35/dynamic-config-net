@@ -211,15 +211,32 @@ public sealed class ConfigurationReader : IDisposable, IAsyncDisposable
     /// a RabbitMQ change source; absent/blank → null (polling-only, zero broker
     /// code on any path). Absence is a MODE, not an error — the case-frozen
     /// constructor has no broker slot, so the environment is the opt-in channel.
+    /// A malformed URI degrades the same way (warn + polling-only): the broker
+    /// asymmetry covers INVALID config too — a typo in an accelerator setting
+    /// must never fail a boot the data source alone could serve.
     /// </summary>
     private static IConfigurationChangeSource? CreateChangeSourceFromEnvironment()
     {
         var brokerUri = Environment.GetEnvironmentVariable(
             RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName);
 
-        return string.IsNullOrWhiteSpace(brokerUri)
-            ? null
-            : new RabbitMqConfigurationChangeSource(brokerUri);
+        if (string.IsNullOrWhiteSpace(brokerUri))
+        {
+            return null;
+        }
+
+        // Validate here, synchronously, because this runs inside the frozen public
+        // constructor — new Uri() throwing would violate the never-fail-boot rule.
+        // The value itself is not echoed: broker URIs carry credentials.
+        if (!Uri.TryCreate(brokerUri, UriKind.Absolute, out _))
+        {
+            Trace.TraceWarning(
+                "DynamicConfig: {0} is set but is not a valid absolute URI; continuing in polling-only mode.",
+                RabbitMqBrokerDefaults.BrokerUriEnvironmentVariableName);
+            return null;
+        }
+
+        return new RabbitMqConfigurationChangeSource(brokerUri);
     }
 
     /// <summary>
